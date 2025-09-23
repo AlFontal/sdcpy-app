@@ -59,6 +59,12 @@ CONTENT_STYLE = {
     'minHeight': '100vh',
 }
 
+DEFAULT_PARAMS = {
+    'method': 'pearson',
+    'labels_fontsize': 6,
+    'plot_dpi': 300,
+}
+
 sidebar = html.Div(
     [
         html.A(
@@ -148,9 +154,12 @@ ts2_dropdown = dcc.Dropdown(options=[{'label': 'Add dataset to select', 'value':
                             placeholder='Select time series 2', id='ts2-dropdown')
 date_dropdown = dcc.Dropdown(options=[{'label': 'Add dataset to select', 'value': 'Empty'}],
                              placeholder='Select date column', id='date-dropdown')
-method_dropdown = dcc.Dropdown(options=[{'label': 'Spearman', 'value': 'spearman'},
-                                        {'label': 'Pearson', 'value': 'pearson'}],
-                               placeholder='Select correlation method', id='method-dropdown')
+method_dropdown = dcc.Dropdown(options=[
+    {'label': 'Pearson', 'value': 'pearson'},
+    {'label': 'Spearman', 'value': 'spearman'},
+    ],
+    value=DEFAULT_PARAMS['method'],
+    id='method-dropdown')
 
 parameter_card = dbc.Card(
     dbc.CardBody([
@@ -181,7 +190,7 @@ plot_options_card = dbc.Card(
                      dbc.Input(id='plot-title', placeholder='Optional custom title', type='text')],
                     className='parameter-col', width=6),
             dbc.Col([html.Label('Label Font Size'),
-                     dbc.Input(id='label-fontsize', type='number', min=5, value=10)],
+                     dbc.Input(id='label-fontsize', type='number', min=5, value=6)],
                     className='parameter-col', width=3),
             dbc.Col([html.Label('Plot DPI'),
                      dbc.Input(id='plot-dpi', type='number', min=72, value=300)],
@@ -541,14 +550,14 @@ def on_update_plot(n_clicks, data, plot_title, label_fontsize, plot_dpi, plot_op
     show_ts2 = 'ts2' in plot_options
 
     try:
-        label_fontsize = int(label_fontsize) if label_fontsize is not None else 12
+        label_fontsize = int(label_fontsize) if label_fontsize is not None else DEFAULT_PARAMS['labels_fontsize']
     except (TypeError, ValueError):
-        label_fontsize = 12
+        label_fontsize = DEFAULT_PARAMS['labels_fontsize']
 
     try:
-        plot_dpi = int(plot_dpi) if plot_dpi is not None else 300
+        plot_dpi = int(plot_dpi) if plot_dpi is not None else DEFAULT_PARAMS['plot_dpi']
     except (TypeError, ValueError):
-        plot_dpi = 300
+        plot_dpi = DEFAULT_PARAMS['plot_dpi']
 
     plot_title_clean = plot_title.strip() if plot_title else None
 
