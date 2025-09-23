@@ -194,4 +194,10 @@ body {
   height: auto;
   max-height: 500px;
   object-fit: contain;
+  cursor: zoom-in;
+}
+
+.plot-hint {
+  color: #6b7280;
+  display: block;
 }

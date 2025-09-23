@@ -187,6 +187,18 @@ file_upload = dbc.Card(
 progress_div = html.Div(id='progress-div', className='card-section')
 results_div = html.Div(id='results-div', className='card-section')
 
+plot_modal = dbc.Modal(
+    [
+        dbc.ModalHeader(dbc.ModalTitle('SDC Plot Preview'), close_button=True),
+        dbc.ModalBody(html.Img(id='modal-plot-img', style={'width': '100%', 'height': 'auto'})),
+        dbc.ModalFooter(dbc.Button('Close', id='close-plot-modal', color='secondary')),
+    ],
+    id='plot-modal',
+    size='xl',
+    centered=True,
+    is_open=False,
+)
+
 run_button = html.Div(dbc.Button('Run SDC Analysis',
                                  disabled=False,
                                  color='primary',
@@ -369,7 +381,11 @@ def manage_job(job_data, _):
             alert = dbc.Alert('No result was returned by the analysis.', color='warning')
             return [alert], False, True, no_update, None, False
 
-        image_div = html.Img(src=f"data:image/png;base64,{result['image']}", id='sdc-results-img')
+        image_div = html.Img(
+            src=f"data:image/png;base64,{result['image']}",
+            id='sdc-results-img',
+            style={'cursor': 'zoom-in'}
+        )
         download_button = dbc.Button('Download Results Table', id='download-button', color='secondary')
         update_button = dbc.Button('Update Plot', id='update-plot-button', color='secondary', outline=True,
                                    className='update-plot-button', n_clicks=0)
@@ -381,6 +397,7 @@ def manage_job(job_data, _):
                 download_button,
                 dcc.Download(id='download-results-xlsx')
             ], className='results-actions'),
+            html.Small('Click the plot to open a large preview.', className='plot-hint'),
             html.Div(id='plot-feedback', className='plot-feedback'),
             image_div,
         ]
@@ -459,6 +476,31 @@ def on_update_plot(n_clicks, data, plot_title, label_fontsize, plot_dpi, plot_op
     return f"data:image/png;base64,{new_image}", feedback
 
 
+@app.callback(
+    Output('plot-modal', 'is_open'),
+    Output('modal-plot-img', 'src'),
+    Input('sdc-results-img', 'n_clicks'),
+    Input('close-plot-modal', 'n_clicks'),
+    State('plot-modal', 'is_open'),
+    State('sdc-results-img', 'src'),
+    prevent_initial_call=True,
+)
+def toggle_plot_modal(open_clicks, close_clicks, is_open, image_src):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+
+    if trigger == 'sdc-results-img' and image_src:
+        return True, image_src
+
+    if trigger == 'close-plot-modal':
+        return False, no_update
+
+    raise PreventUpdate
+
+
 content_div = html.Div([title_row,
                         html.Div(className='title-underline'),
                         instructions_row,
@@ -477,7 +519,8 @@ app.layout = html.Div(children=[sidebar,
                                 data_memory_store,
                                 results_store,
                                 job_store,
-                                job_interval])
+                                job_interval,
+                                plot_modal])
 
 
 if __name__ == '__main__':
