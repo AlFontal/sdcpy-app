@@ -143,8 +143,7 @@ def build_column_defs(df: pd.DataFrame):
 title_row = html.H2('Scale dependent correlation analysis App', className='page-title')
 
 instructions_row = html.P(
-    'Start by uploading a .csv file containing at the very least a single column with a column header '
-    'and numerical values.',
+    'Start by uploading a .csv file containing at least a numerical column and a date column with headers.',
     className='page-subtitle'
 )
 
@@ -212,55 +211,91 @@ plot_options_card = dbc.Card(
                 ),
             ], className='parameter-col', width=12),
         ], className='parameter-row'),
+        html.Div(
+            [
+                dbc.Button('Update Plot', id='update-plot-button', color='secondary', outline=True,
+                           className='update-plot-button', n_clicks=0, disabled=True),
+                html.Div(id='plot-feedback', className='plot-feedback')
+            ],
+            className='plot-actions'
+        ),
     ]),
     className='parameters-card'
 )
 
 file_upload = dbc.Card(
     [
-        dbc.CardBody([
-            html.H4('Upload Dataset', className='card-title'),
-            html.P('Drag and drop or click to upload a CSV file.', className='card-subtitle'),
-            dcc.Upload(
-                id='upload-data',
-                children=html.Div('Upload dataset (.csv)', className='upload-box'),
-                className='upload-container'
-            ),
-            html.Div(id='output-data-upload')
-        ])
+        dbc.CardHeader(
+            dbc.Button(
+                [
+                    html.Span('Upload Dataset', id='upload-card-title', className='card-header-text'),
+                    html.Span('▴', id='upload-card-icon', className='card-toggle-icon')
+                ],
+                id='toggle-upload-card',
+                color='link',
+                className='card-toggle-button',
+                n_clicks=0
+            )
+        ),
+        dbc.Collapse(
+            dbc.CardBody([
+                html.P('Drag and drop or click to upload a CSV file.', className='card-subtitle'),
+                dcc.Upload(
+                    id='upload-data',
+                    children=html.Div('Upload dataset (.csv)', className='upload-box'),
+                    className='upload-container'
+                ),
+                html.Div(id='output-data-upload')
+            ]),
+            id='upload-collapse',
+            is_open=True
+        )
     ],
-    className='upload-card'
+    className='upload-card collapsible-card'
 )
 
 table_preview = dbc.Card(
     [
-        dbc.CardBody([
-            html.H4('Dataset Preview', className='card-title'),
-            html.P('Preview the uploaded rows before selecting the analysis parameters.',
-                   className='card-subtitle'),
-            dag.AgGrid(
-                id='data-grid',
-                columnDefs=[],
-                rowData=[],
-                defaultColDef={
-                    "sortable": False,
-                    "resizable": True,
-                    "flex": 1,
-                    "minWidth": 140,
-                },
-                dashGridOptions={
-                    "pagination": True,
-                    "paginationPageSize": 15,
-                    "animateRows": False,
-                    "rowHeight": 38,
-                    "suppressCellSelection": True,
-                    "domLayout": "autoHeight",
-                },
-                className='ag-theme-alpine compact-ag-theme',
+        dbc.CardHeader(
+            dbc.Button(
+                [
+                    html.Span('Dataset Preview', id='preview-card-title', className='card-header-text'),
+                    html.Span('▴', id='preview-card-icon', className='card-toggle-icon')
+                ],
+                id='toggle-preview-card',
+                color='link',
+                className='card-toggle-button',
+                n_clicks=0
             )
-        ])
+        ),
+        dbc.Collapse(
+            dbc.CardBody([
+                dag.AgGrid(
+                    id='data-grid',
+                    columnDefs=[],
+                    rowData=[],
+                    defaultColDef={
+                        "sortable": False,
+                        "resizable": True,
+                        "flex": 1,
+                        "minWidth": 140,
+                    },
+                    dashGridOptions={
+                        "pagination": True,
+                        "paginationPageSize": 10,
+                        "animateRows": False,
+                        "rowHeight": 38,
+                        "suppressCellSelection": True,
+                        "domLayout": "autoHeight",
+                    },
+                    className='ag-theme-alpine compact-ag-theme',
+                )
+            ]),
+            id='preview-collapse',
+            is_open=True
+        )
     ],
-    className='table-card'
+    className='table-card collapsible-card'
 )
 progress_div = html.Div(id='progress-div', className='card-section')
 results_div = html.Div(id='results-div', className='card-section')
@@ -277,14 +312,12 @@ plot_modal = dbc.Modal(
     is_open=False,
 )
 
-run_button = html.Div(dbc.Button('Run SDC Analysis',
-                                 disabled=False,
-                                 color='primary',
-                                 size='lg',
-                                 className='run-button',
-                                 id='run-button'),
-                      id='run-button-div',
-                      hidden=True)
+run_button = dbc.Button('Run SDC Analysis',
+                        disabled=True,
+                        color='primary',
+                        size='lg',
+                        className='run-button',
+                        id='run-button')
 
 
 def parse_contents(contents, filename):
@@ -307,17 +340,39 @@ def parse_contents(contents, filename):
                Output('data-grid', 'rowData'),
                Output('data-grid', 'columnDefs'),
                Output('upload-data', 'children'),
-               Output('parameters-div', 'hidden'),
-               Output('plot-options-div', 'hidden'),
-               Output('run-button-div', 'hidden'),
+               Output('parameters-card-container', 'hidden'),
+               Output('plot-options-card-container', 'hidden'),
+               Output('run-button-container', 'hidden'),
+               Output('results-divider', 'hidden'),
+               Output('progress-container', 'hidden'),
+               Output('results-container', 'hidden'),
+               Output('run-button', 'disabled', allow_duplicate=True),
+               Output('update-plot-button', 'disabled', allow_duplicate=True),
+               Output('upload-card-title', 'children'),
+               Output('preview-card-title', 'children'),
+               Output('plot-feedback', 'children', allow_duplicate=True),
                Output('output-data-upload', 'children')],
-              Input('upload-data', 'contents'),
-              State('upload-data', 'filename'))
+             Input('upload-data', 'contents'),
+             State('upload-data', 'filename'),
+             prevent_initial_call=True)
 def update_output(content, filename):
     if content is not None:
         data, error = parse_contents(content, filename)
         if error is not None:
-            return no_update, no_update, no_update, no_update, True, True, True, error
+            return (no_update, no_update, no_update, no_update,
+                    True,  # upload-data children placeholder
+                    True,  # parameters card hidden
+                    True,  # plot card hidden
+                    True,  # run button container hidden
+                    True,  # divider hidden
+                    True,  # progress container hidden
+                    True,  # results container hidden
+                    True,  # run button disabled
+                    True,  # update plot disabled
+                    'Upload Dataset',
+                    'Dataset Preview',
+                    [],
+                    error)
         df = pd.DataFrame(data)
         grid_df = df.copy()
         for col in grid_df.columns:
@@ -332,9 +387,17 @@ def update_output(content, filename):
                 row_data,
                 column_defs,
                 html.P(filename, className='upload-filename'),
-                False,
-                False,
-                False,
+                False,  # parameters card visible
+                False,  # plot card visible
+                False,  # run button container visible
+                True,   # divider hidden until run starts
+                True,   # progress container hidden
+                True,   # results container hidden
+                False,  # run button enabled
+                True,   # update plot disabled until results exist
+                f'Uploaded dataset: {filename}',
+                f'Dataset Preview – {len(df):,} rows and {len(df.columns):,} columns',
+                [],
                 [])
     else:
         raise PreventUpdate
@@ -351,6 +414,67 @@ def update_series(data):
         return options, options, options
     else:
         raise PreventUpdate
+
+
+@app.callback(
+    Output('run-button', 'disabled', allow_duplicate=True),
+    Input('data-memory-store', 'data'),
+    prevent_initial_call=True,
+)
+def enable_run_button(data):
+    if data is None:
+        raise PreventUpdate
+    return False
+
+
+@app.callback(
+    Output('upload-collapse', 'is_open'),
+    Output('upload-card-icon', 'children'),
+    Input('toggle-upload-card', 'n_clicks'),
+    Input('raw-data-store', 'data'),
+    State('upload-collapse', 'is_open'),
+    prevent_initial_call=True,
+)
+def toggle_upload_collapse(toggle_clicks, data, is_open):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+
+    if trigger == 'raw-data-store':
+        new_state = False if data is not None else is_open
+    else:
+        new_state = not is_open
+
+    icon = '▴' if new_state else '▾'
+    return new_state, icon
+
+
+@app.callback(
+    Output('preview-collapse', 'is_open'),
+    Output('preview-card-icon', 'children'),
+    Input('toggle-preview-card', 'n_clicks'),
+    State('preview-collapse', 'is_open'),
+    prevent_initial_call=True,
+)
+def toggle_preview_collapse(n_clicks, is_open):
+    if not n_clicks:
+        raise PreventUpdate
+    new_state = not is_open
+    icon = '▴' if new_state else '▾'
+    return new_state, icon
+
+
+@app.callback(
+    Output('run-button', 'children', allow_duplicate=True),
+    Input('raw-data-store', 'data'),
+    prevent_initial_call=True,
+)
+def set_run_button_label(data):
+    if data is None:
+        raise PreventUpdate
+    return 'Run SDC Analysis'
 
 
 @app.callback(
@@ -436,7 +560,12 @@ def enqueue_sdc_job(n_clicks, ts1, ts2, date, method, min_lag, max_lag, window,
     Output('job-interval', 'disabled'),
     Output('results-div', 'children'),
     Output('results-store', 'data'),
-    Output('run-button', 'disabled'),
+    Output('run-button', 'disabled', allow_duplicate=True),
+    Output('run-button', 'children', allow_duplicate=True),
+    Output('update-plot-button', 'disabled'),
+    Output('results-divider', 'hidden', allow_duplicate=True),
+    Output('progress-container', 'hidden', allow_duplicate=True),
+    Output('results-container', 'hidden', allow_duplicate=True),
     Input('job-store', 'data'),
     Input('job-interval', 'n_intervals'),
     prevent_initial_call=True,
@@ -451,11 +580,11 @@ def manage_job(job_data, _):
 
         if job_data.get('status') == 'error':
             alert = dbc.Alert(job_data['message'], color='danger')
-            return [alert], False, True, no_update, no_update, False
+            return [alert], False, True, no_update, no_update, False, dash.no_update, True, True, True, True
 
         if job_data.get('status') == 'queued':
             progress_children = build_progress_content({'description': job_data.get('message'), 'current': 0, 'total': None})
-            return progress_children, False, False, no_update, no_update, True
+            return progress_children, False, False, no_update, no_update, True, dash.no_update, True, False, False, True
 
         raise PreventUpdate
 
@@ -466,11 +595,11 @@ def manage_job(job_data, _):
         job = Job.fetch(job_data['id'], connection=redis_connection)
     except NoSuchJobError:
         alert = dbc.Alert('The analysis job could not be found. Please try again.', color='danger')
-        return [alert], False, True, no_update, None, False
+        return [alert], False, True, no_update, None, False, dash.no_update, True, True, True, True
 
     if job.is_failed:
         alert = dbc.Alert('The analysis failed. Check the logs and try again.', color='danger')
-        return [alert], False, True, no_update, None, False
+        return [alert], False, True, no_update, None, False, dash.no_update, True, True, True, True
 
     progress = job.meta.get('progress', {})
 
@@ -478,7 +607,7 @@ def manage_job(job_data, _):
         result = job.result
         if not result:
             alert = dbc.Alert('No result was returned by the analysis.', color='warning')
-            return [alert], False, True, no_update, None, False
+            return [alert], False, True, no_update, None, False, dash.no_update, True, True, True, True
 
         image_div = html.Img(
             src=f"data:image/png;base64,{result['image']}",
@@ -486,28 +615,24 @@ def manage_job(job_data, _):
             style={'cursor': 'zoom-in'}
         )
         download_button = dbc.Button('Download Results Table', id='download-button', color='secondary')
-        update_button = dbc.Button('Update Plot', id='update-plot-button', color='secondary', outline=True,
-                                   className='update-plot-button', n_clicks=0)
 
         results_children = [
             dcc.Markdown('### SDC Analysis Results'),
             html.Div([
-                update_button,
                 download_button,
                 dcc.Download(id='download-results-xlsx')
             ], className='results-actions'),
             html.Small('Click the plot to open a large preview.', className='plot-hint'),
-            html.Div(id='plot-feedback', className='plot-feedback'),
             image_div,
         ]
 
         total = progress.get('total') or 1
         success_progress = build_progress_content({'description': 'Completed', 'current': total, 'total': total})
 
-        return success_progress, True, True, results_children, result, False
+        return success_progress, True, True, results_children, result, False, 'Re-run SDC Analysis', False, False, True, False
 
     running_progress = build_progress_content(progress)
-    return running_progress, False, False, no_update, no_update, True
+    return running_progress, False, False, no_update, no_update, True, dash.no_update, True, False, False, True
 @app.callback(
     Output("download-results-xlsx", "data"),
     Input("download-button", "n_clicks"),
@@ -542,8 +667,7 @@ def on_update_plot(n_clicks, data, plot_title, label_fontsize, plot_dpi, plot_op
         raise PreventUpdate
 
     if not data or 'analysis' not in data:
-        alert = dbc.Alert('Please run the SDC analysis before updating the plot.', color='warning', dismissible=True)
-        return no_update, alert
+        return no_update, no_update
 
     plot_options = plot_options or []
     show_colorbar = 'colorbar' in plot_options
@@ -605,13 +729,12 @@ content_div = html.Div([title_row,
                         instructions_row,
                         file_upload,
                         table_preview,
-                        html.Div(parameter_card, hidden=True, id='parameters-div'),
-                        html.Div(plot_options_card, hidden=True, id='plot-options-div'),
-                        html.Br(),
-                        run_button,
-                        html.Div(className='section-divider'),
-                        progress_div,
-                        results_div],
+                        html.Div(parameter_card, hidden=True, id='parameters-card-container'),
+                        html.Div(run_button, className='run-button-container', hidden=True, id='run-button-container'),
+                        html.Div(progress_div, hidden=True, id='progress-container'),
+                        html.Div(plot_options_card, hidden=True, id='plot-options-card-container'),
+                        html.Div(className='section-divider', hidden=True, id='results-divider'),
+                        html.Div(results_div, hidden=True, id='results-container')],
                        style=CONTENT_STYLE,
                        className='content-wrapper')
 
