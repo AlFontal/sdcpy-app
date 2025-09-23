@@ -1,5 +1,10 @@
 # SDCpy App
 
+[![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
+[![Dash](https://img.shields.io/badge/Dash-2.x-119DFF.svg)](https://dash.plotly.com/)
+[![Docker](https://img.shields.io/badge/Docker-ready-0db7ed.svg)](https://www.docker.com/)
+[![License](https://img.shields.io/badge/License-BSD-lightgrey.svg)](./LICENSE)
+
 <img src="https://raw.githubusercontent.com/AlFontal/sdcpy-app/master/static/sdcpy_logo_black.png" width="200" height="250" />
 
 Interactive Dash application for exploring and running [SDCpy](https://github.com/AlFontal/sdcpy)
