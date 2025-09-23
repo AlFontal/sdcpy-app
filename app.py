@@ -152,8 +152,8 @@ method_dropdown = dcc.Dropdown(options=[{'label': 'Spearman', 'value': 'spearman
                                         {'label': 'Pearson', 'value': 'pearson'}],
                                placeholder='Select correlation method', id='method-dropdown')
 
-parameter_rows = html.Div(
-    [
+parameter_card = dbc.Card(
+    dbc.CardBody([
         html.H4('SDC Parameters', className='section-title'),
         dbc.Row([
             dbc.Col([html.Label('Time Series 1'), ts1_dropdown], className='parameter-col'),
@@ -169,16 +169,25 @@ parameter_rows = html.Div(
             dbc.Col([html.Label('Window Size (s)'),
                      dbc.Input(id='window', placeholder='Select window size', type='number', min=0)], className='parameter-col'),
         ], className='parameter-row'),
+    ]),
+    className='parameters-card'
+)
+
+plot_options_card = dbc.Card(
+    dbc.CardBody([
+        html.H4('Plot Styling', className='section-title'),
         dbc.Row([
             dbc.Col([html.Label('Plot Title'),
                      dbc.Input(id='plot-title', placeholder='Optional custom title', type='text')],
-                    className='parameter-col', width=4),
+                    className='parameter-col', width=6),
             dbc.Col([html.Label('Label Font Size'),
                      dbc.Input(id='label-fontsize', type='number', min=5, value=10)],
-                    className='parameter-col', width=2),
+                    className='parameter-col', width=3),
             dbc.Col([html.Label('Plot DPI'),
                      dbc.Input(id='plot-dpi', type='number', min=72, value=300)],
-                    className='parameter-col', width=2),
+                    className='parameter-col', width=3),
+        ], className='parameter-row'),
+        dbc.Row([
             dbc.Col([
                 html.Label('Display Options'),
                 dbc.Checklist(
@@ -192,9 +201,11 @@ parameter_rows = html.Div(
                     inline=True,
                     className='parameter-switch'
                 ),
-            ], className='parameter-col', width=4),
+            ], className='parameter-col', width=12),
         ], className='parameter-row'),
-    ], hidden=True, id='parameters-div', className='parameters-card')
+    ]),
+    className='parameters-card'
+)
 
 file_upload = dbc.Card(
     [
@@ -288,6 +299,7 @@ def parse_contents(contents, filename):
                Output('data-grid', 'columnDefs'),
                Output('upload-data', 'children'),
                Output('parameters-div', 'hidden'),
+               Output('plot-options-div', 'hidden'),
                Output('run-button-div', 'hidden'),
                Output('output-data-upload', 'children')],
               Input('upload-data', 'contents'),
@@ -296,7 +308,7 @@ def update_output(content, filename):
     if content is not None:
         data, error = parse_contents(content, filename)
         if error is not None:
-            return no_update, no_update, no_update, no_update, True, True, error
+            return no_update, no_update, no_update, no_update, True, True, True, error
         df = pd.DataFrame(data)
         grid_df = df.copy()
         for col in grid_df.columns:
@@ -311,6 +323,7 @@ def update_output(content, filename):
                 row_data,
                 column_defs,
                 html.P(filename, className='upload-filename'),
+                False,
                 False,
                 False,
                 [])
@@ -583,7 +596,8 @@ content_div = html.Div([title_row,
                         instructions_row,
                         file_upload,
                         table_preview,
-                        parameter_rows,
+                        html.Div(parameter_card, hidden=True, id='parameters-div'),
+                        html.Div(plot_options_card, hidden=True, id='plot-options-div'),
                         html.Br(),
                         run_button,
                         html.Div(className='section-divider'),
