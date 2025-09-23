@@ -1,48 +1,75 @@
-# SDCpy app
+# SDCpy App
 
 <img src="https://raw.githubusercontent.com/AlFontal/sdcpy-app/master/static/sdcpy_logo_black.png" width="200" height="250" />
 
-Simple web app built with [Dash](https://dash.plotly.com/) and hosted in Heroku to enable a web-based 
-GUI for Scale Dependent Correlation analysis.
+Interactive Dash application for exploring and running [SDCpy](https://github.com/AlFontal/sdcpy)
+Scale Dependent Correlation (SDC) analyses through a friendly web interface.
 
-Current deployment of the app (still in the very *alpha* phase) can be accessed in https://sdcpy-app.herokuapp.com/.
+## Highlights
+- **Modern UI** : upload data, preview the first rows in an Alpine-themed AgGrid table, and
+  configure parameters in dedicated cards.
+- **Background execution** : long-running SDC jobs are dispatched to a Redis/RQ worker so the UI stays responsive.
+- **Customisable output** : tweak plot titles, DPI, label sizes, and toggle elements before (or after) running;
+  regenerate the visual instantly via the `Update Plot` button.
+- **Result handling** : view the generated SDC plot in-app, open it in a lightbox, and download the Excel output.
 
-### Current Limitations
+## Getting Started (Docker Compose)
+The recommended way to run the app locally is with Docker Compose.
 
-One of the main constraints of the deployed app is Heroku's 30 second timeout for requests.
-If a request to Heroku's dyno takes longer than 30 second to get back to the router it will be 
-terminated, and the app will stay awaiting for a response completely unaware of the fact that
-its requests has been terminated. This is specially annoying considering that computation of SDC
-can easily get over 30 secs if the time series is long enough (specially when using Spearman instead
-of Pearson as the correlation metric). 
+### Prerequisites
+- [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/install/) installed
 
-A proper way of handling this would  involve using asynchronous tasks handlers, which would possibly
-work using a combination of Redis and Celery, and I will try to do so if I find the time as this
-seems to be the solution with best practices. 
-Another (hacky) alternative would be to modify `sdcpy`'s code to periodically pipe some output (such
-as tqdm's progress bar) which could be fetched by the app and use to inform a dash progress bar which
-would effectively keep the service awake. Migrating to another service such as AWS Elastic Beanstalk
-might help, but it still appears to have a hard cap of 60 sec timeout and loses the *forever free* appeal
-of Heroku (and domain names are paid).
-
-So far, the best way to use the app if you intend to run long computations is to run it locally, so:
-
-### Running Locally
-
-In order to run the app locally, you will need to have Python >= 3.8 installed on your system and to
-include the project dependencies. The project is set up to use `poetry` to handle dependencies, so
-just run:
+### Launch the stack
+```bash
+docker compose up --build
 ```
-poetry install
-```
-And it should set up a virtual environment and install the dependencies defined in `pyproject.toml`.
-To run the app just use:
-```
-poetry run python app.py
-```
-And a running version of the app should be accessible in your machine's `8050` port: http://localhost:8050
+This starts three services declared in `docker-compose.yml`:
 
-If you can't/don't want to use `poetry`, there is a `requirements.txt` file because Heroku requires it,
-so a regular virtualenv installation using `venv` and `pip` should suffice.
+- `redis` : message broker for queued SDC jobs
+- `worker` : RQ worker that executes the SDC analysis
+- `sdcpy-app` : Dash web application (served on port `8050`)
 
+Once the build finishes, open <http://localhost:8050> in your browser.
 
+### Stopping the stack
+```bash
+docker compose down
+```
+Add `-v` if you also want to remove Redis volumes.
+
+## Manual Python Execution (optional)
+If you prefer running outside Docker you need Python ≥ 3.11 and Redis available locally. Then:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+redis-server  # in another terminal or via a service manager
+python worker.py  # start the RQ worker in a separate shell
+python app.py
+```
+The Dash server will be available at <http://localhost:8050> and the worker must stay running for queued jobs.
+
+## Typical Workflow
+1. **Upload CSV** : Drag-and-drop a CSV file. After upload the card collapses to show the filename.
+2. **Preview data** : Expand “Dataset Preview” to inspect the first 10 rows (pagination available).
+3. **Set parameters** : Choose time series columns, date column, correlations, lags, and window size.
+4. **Style output** : Adjust titles, label font size, DPI, and optional plot elements.
+5. **Run SDC Analysis** : The job moves to the background worker; progress is shown in the UI.
+6. **Inspect & download** : View the resulting plot, open it in the modal for a closer look, download the Excel export.
+7. **Update plot styling** : Change plot options and press “Update Plot” to regenerate the visual without rerunning SDC.
+
+## Project Structure
+- `app.py` : Dash application with queues, callbacks, and UI components
+- `tasks.py` : SDC analysis worker tasks and plotting helpers
+- `worker.py` : RQ worker entrypoint
+- `docker-compose.yml` : local orchestration for app + worker + Redis
+- `Dockerfile` : container image definition (Python 3.11 base)
+- `assets/` : static assets, including custom CSS
+
+## License
+Distributed under the BSD license (see `pyproject.toml`).
+
+Enjoy exploring SDC analysis through the browser, and feel free to extend the app or open issues/PRs in this repository.
+
+Several upgrades are planned. Stay tuned!
