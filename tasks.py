@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import math
 import base64
+import re
 import warnings
 import numpy as np
 import pandas as pd
@@ -132,7 +133,37 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
                    metric_label: str = None, show_ts2: bool = True,
                    **kwargs):
         # Setting up parameters
-        title = f'SDC plot (s = {self.fragment_size})' if title is None else title
+        frequency = pd.infer_freq(self.ts1.index)
+        if frequency:
+            if re.match(r'^[0-9]*D', frequency):
+                freq_str = 'days'
+                freq_unit = 'D'
+                if re.match(r'^[0-9]+D', frequency):
+                    freq_mult = int(re.match(r'^([0-9]+)D', frequency).groups()[0])
+                else:
+                    freq_mult = 1
+            # capture first alphabetic (non-numeric) letter and check if it's W
+            elif re.match(r'^[0-9]*W', frequency):
+                freq_str = 'weeks'
+                freq_unit = 'W'
+                if re.match(r'^[0-9]+W', frequency):
+                    freq_mult = int(re.match(r'^([0-9]+)W', frequency).groups()[0])
+                else:
+                    freq_mult = 1
+            elif frequency[0] == 'M':
+                freq_str = 'months'
+                freq_unit = 'W'
+                if re.match(r'^[0-9]+M', frequency):
+                    freq_mult = int(re.match(r'^([0-9]+)M', frequency).groups()[0]) * 4.33
+                else:
+                    freq_mult = 4.33
+            else: 
+                freq_str = ''
+        else:
+            raise warnings.warn('Could not infer frequency of the time-series. Axis labels may be incorrect.')
+            freq_str = ''
+        
+        title = f'' if title is None else title
         align = align.lower()
         metric_label = metric_label if metric_label is not None else self.method
 
@@ -162,7 +193,7 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
             gs = fig.add_gridspec(4, 5, height_ratios=[.15, 1, 2, 1], width_ratios=[1, 2, 2, 1, .2])
         else:
             raise ValueError('Range of lags to be considered should be bigger than 1')
-        #
+        
         # Time series 1
         ts1 = fig.add_subplot(gs[1, 1:3])
         ts1.plot(self.ts1, color='black', linewidth=1)
@@ -216,7 +247,7 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
         hm.plot([0, 0], [-self.fragment_size / 2, self.fragment_size / 2],
                 color='k', transform=trans_y, clip_on=False, linewidth=5, solid_capstyle='butt')
 
-        hm.annotate(f'$s={self.fragment_size}$ weeks', xy=(self.fragment_size / 2 + 5, .99),
+        hm.annotate(f'$s={self.fragment_size}$ {freq_str}', xy=(self.fragment_size / 2 + 5, .99),
                     xycoords=trans_x, fontsize=labels_fontsize)
 
         # Handle TS1 labels and ticks
@@ -259,8 +290,8 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
         if show_colorbar:
             cax = fig.add_subplot(gs[2:4, -1])
         color_mesh = hm.get_children()[0]
-        # lims = (-1, 1) if self.config["method"] in ['pearson', 'spearman'] else 0, max_r
-        # color_mesh.set_clim(lims[0], lims[1])
+        lims = -1, 1 if self.method in ['pearson', 'spearman'] else 0, max_r
+        color_mesh.set_clim(lims[0], lims[1])
         if show_colorbar:
             fig.colorbar(color_mesh, cax=cax, label=metric_label, pad=0.05)
         
@@ -278,7 +309,7 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
             .rename(columns={'r_max': 'Max $r$', 'r_min': 'Min $r$ (abs)'})
             .reset_index()
             .melt('date_1')
-            .assign(date_1=lambda dd: dd.date_1 + pd.to_timedelta(f'{left_offset} days'))
+            .assign(date_1=lambda dd: dd.date_1 + pd.to_timedelta(left_offset * freq_mult, unit=freq_unit))
             .assign(color=lambda dd: dd.variable.apply(lambda x: colors[x]))
             .plot.scatter(x='date_1', y='value', c='color', ax=mc1, style='-', alpha=1, colorbar=False, s=10)
             )
@@ -300,7 +331,7 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
             .rename(columns={'r_max': 'Max $r$', 'r_min': 'Min $r$ (abs)'})
             .reset_index()
             .melt('date_2')
-            .assign(date_2=lambda dd: dd.date_2 + pd.to_timedelta(f'{left_offset} days'))
+            .assign(date_2=lambda dd: dd.date_2 + pd.to_timedelta(left_offset * freq_mult, unit=freq_unit))
             .assign(color=lambda dd: dd.variable.apply(lambda x: colors[x]))
             .plot.scatter(x='value', y='date_2', c='color', ax=mc2, style='o', alpha=.7, colorbar=False)
             )
@@ -309,7 +340,7 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
             mc2.set_ylabel('')
             mc2.grid(True, which='major')
             mc2.set_xlim(1.05, 0)
-            mc2.yaxis.set_label_position('right')
+            mc2.yaxis.set_label_position('left')
             mc2.set_ylim(self.ts2.index[-1], self.ts2.index[0])
 
 
