@@ -8,3 +8,4 @@ whitenoise>=5.2.0
 redis>=4.6.0
 rq>=1.15.1
 xlsxwriter>=3.0.3
+dash-ag-grid>=2.1.0

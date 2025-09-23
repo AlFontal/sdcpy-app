@@ -11,6 +11,7 @@ from rq.job import Job
 from rq.exceptions import NoSuchJobError
 
 from dash import html, dcc, no_update
+import dash_ag_grid as dag
 import tasks
 from whitenoise import WhiteNoise
 from dash.exceptions import PreventUpdate
@@ -20,6 +21,8 @@ app = dash.Dash(
     external_stylesheets=[
         dbc.themes.BOOTSTRAP,
         'https://fonts.googleapis.com/css2?family=Play:wght@400;700&display=swap',
+        'https://cdn.jsdelivr.net/npm/ag-grid-community/styles/ag-grid.css',
+        'https://cdn.jsdelivr.net/npm/ag-grid-community/styles/ag-theme-alpine.css',
     ],
     suppress_callback_exceptions=True
 )
@@ -80,6 +83,7 @@ sidebar = html.Div(
     ], style=SIDEBAR_STYLE,
 )
 
+raw_data_store = dcc.Store(id='raw-data-store', data=None)
 data_memory_store = dcc.Store(id='data-memory-store')
 results_store = dcc.Store(id='results-store', data=None)
 job_store = dcc.Store(id='job-store', data=None)
@@ -105,6 +109,29 @@ def build_progress_content(progress=None):
         components.append(dcc.Markdown(f'{current} / {total} iterations'))
 
     return components
+
+
+def build_column_defs(df: pd.DataFrame):
+    column_defs = []
+    for col in df.columns:
+        col_def = {
+            'headerName': col,
+            'field': col,
+        }
+        series = df[col]
+
+        if pd.api.types.is_numeric_dtype(series):
+            col_def.update({
+                'cellClass': 'ag-right-aligned-cell',
+            })
+        elif pd.api.types.is_datetime64_any_dtype(series):
+            col_def.setdefault('valueFormatter', {
+                'function': "function(params){return params.value ? new Date(params.value).toLocaleString() : '';}"
+            })
+
+        column_defs.append(col_def)
+
+    return column_defs
 
 
 title_row = html.H2('Scale dependent correlation analysis App', className='page-title')
@@ -184,6 +211,37 @@ file_upload = dbc.Card(
     ],
     className='upload-card'
 )
+
+table_preview = dbc.Card(
+    [
+        dbc.CardBody([
+            html.H4('Dataset Preview', className='card-title'),
+            html.P('Preview the uploaded rows before selecting the analysis parameters.',
+                   className='card-subtitle'),
+            dag.AgGrid(
+                id='data-grid',
+                columnDefs=[],
+                rowData=[],
+                defaultColDef={
+                    "sortable": False,
+                    "resizable": True,
+                    "flex": 1,
+                    "minWidth": 140,
+                },
+                dashGridOptions={
+                    "pagination": True,
+                    "paginationPageSize": 15,
+                    "animateRows": False,
+                    "rowHeight": 38,
+                    "suppressCellSelection": True,
+                    "domLayout": "autoHeight",
+                },
+                className='ag-theme-alpine compact-ag-theme',
+            )
+        ])
+    ],
+    className='table-card'
+)
 progress_div = html.Div(id='progress-div', className='card-section')
 results_div = html.Div(id='results-div', className='card-section')
 
@@ -224,7 +282,10 @@ def parse_contents(contents, filename):
                                 color='danger')
 
 
-@app.callback([Output('data-memory-store', 'data'),
+@app.callback([Output('raw-data-store', 'data'),
+               Output('data-memory-store', 'data'),
+               Output('data-grid', 'rowData'),
+               Output('data-grid', 'columnDefs'),
                Output('upload-data', 'children'),
                Output('parameters-div', 'hidden'),
                Output('run-button-div', 'hidden'),
@@ -235,8 +296,24 @@ def update_output(content, filename):
     if content is not None:
         data, error = parse_contents(content, filename)
         if error is not None:
-            return no_update, no_update, True, True, error
-        return data, html.P(filename, className='upload-filename'), False, False, []
+            return no_update, no_update, no_update, no_update, True, True, error
+        df = pd.DataFrame(data)
+        grid_df = df.copy()
+        for col in grid_df.columns:
+            if pd.api.types.is_datetime64_any_dtype(grid_df[col]):
+                grid_df[col] = pd.to_datetime(grid_df[col]).dt.tz_localize(None).dt.strftime('%Y-%m-%d %H:%M:%S')
+
+        row_data = grid_df.fillna('').to_dict('records')
+        column_defs = build_column_defs(df)
+        serialized = df.to_dict('list')
+        return (serialized,
+                serialized,
+                row_data,
+                column_defs,
+                html.P(filename, className='upload-filename'),
+                False,
+                False,
+                [])
     else:
         raise PreventUpdate
 
@@ -505,6 +582,7 @@ content_div = html.Div([title_row,
                         html.Div(className='title-underline'),
                         instructions_row,
                         file_upload,
+                        table_preview,
                         parameter_rows,
                         html.Br(),
                         run_button,
@@ -516,6 +594,7 @@ content_div = html.Div([title_row,
 
 app.layout = html.Div(children=[sidebar,
                                 content_div,
+                                raw_data_store,
                                 data_memory_store,
                                 results_store,
                                 job_store,

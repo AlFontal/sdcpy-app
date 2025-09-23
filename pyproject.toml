@@ -14,6 +14,7 @@ dash-bootstrap-components = "^0.12.2"
 whitenoise = "^5.2.0"
 redis = "^4.6.0"
 rq = "^1.15.1"
+dash-ag-grid = "^2.1.0"
 
 [tool.poetry.dev-dependencies]
 gunicorn = "^20.1.0"

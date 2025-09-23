@@ -46,6 +46,14 @@ body {
   margin-bottom: 2rem;
 }
 
+.table-card {
+  background-color: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
 .upload-container {
   border: 2px dashed rgba(79, 70, 229, 0.4);
   border-radius: 14px;
@@ -124,6 +132,11 @@ body {
   font-weight: 600;
 }
 
+.plot-hint {
+  color: #6b7280;
+  display: block;
+}
+
 .card-title {
   font-weight: 700;
   font-size: 1.25rem;
@@ -179,6 +192,31 @@ body {
 .sidebar-icon {
   width: 36px;
   height: 36px;
+}
+
+.compact-ag-theme.ag-theme-alpine {
+  --ag-background-color: #ffffff;
+  --ag-foreground-color: #1f2937;
+  --ag-secondary-foreground-color: #4b5563;
+  --ag-border-color: rgba(15, 23, 42, 0.08);
+  --ag-header-background-color: #eef2ff;
+  --ag-row-hover-color: rgba(79, 70, 229, 0.08);
+  --ag-selected-row-background-color: rgba(79, 70, 229, 0.12);
+  border-radius: 12px;
+  overflow: hidden;
+  font-family: 'Play', 'Segoe UI', sans-serif;
+}
+
+.compact-ag-theme .ag-header-cell-label {
+  font-weight: 700;
+}
+
+.compact-ag-theme .ag-row {
+  font-size: 0.95rem;
+}
+
+.ag-right-aligned-cell {
+  text-align: right;
 }
 
 #progress-div .progress {
