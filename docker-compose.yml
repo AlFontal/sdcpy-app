@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  sdcpy-app:
+    build: .
+    ports:
+      - "8050:8050"
+    environment:
+      - PORT=8050
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      # Mount current directory for development (optional)
+      - .:/app
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: python worker.py
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"

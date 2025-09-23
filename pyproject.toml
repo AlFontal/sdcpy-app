@@ -6,12 +6,15 @@ authors = ["Alejandro Fontal <alejandrofontal92@gmail.com>"]
 license = "BSD"
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = "^3.11"
 pandas = "^1.2.5"
 dash = "^1.20.0"
 sdcpy = "^0.2.2"
 dash-bootstrap-components = "^0.12.2"
 whitenoise = "^5.2.0"
+redis = "^4.6.0"
+rq = "^1.15.1"
+dash-ag-grid = "^2.1.0"
 
 [tool.poetry.dev-dependencies]
 gunicorn = "^20.1.0"
