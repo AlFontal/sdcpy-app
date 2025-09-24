@@ -65,7 +65,7 @@ DEFAULT_PARAMS = {
     'plot_dpi': 300,
 }
 
-sidebar = html.Div(
+sidebar_content = html.Div(
     [
         html.A(
             html.Div(
@@ -87,6 +87,18 @@ sidebar = html.Div(
             className='sidebar-link-container'
         ),
     ], style=SIDEBAR_STYLE,
+)
+
+sidebar = html.Div(sidebar_content, className='desktop-sidebar')
+
+mobile_sidebar = dbc.Offcanvas(
+    sidebar_content,
+    id='sidebar-offcanvas',
+    title='SDCpy',
+    placement='start',
+    backdrop=True,
+    scrollable=True,
+    style={'background': SIDEBAR_STYLE['background'], 'color': 'white'}
 )
 
 raw_data_store = dcc.Store(id='raw-data-store', data=None)
@@ -141,6 +153,14 @@ def build_column_defs(df: pd.DataFrame):
 
 
 title_row = html.H2('Scale dependent correlation analysis App', className='page-title')
+
+sidebar_toggle_button = dbc.Button(
+    '☰ Menu',
+    id='sidebar-toggle',
+    color='light',
+    className='sidebar-toggle-button d-lg-none',
+    n_clicks=0
+)
 
 instructions_row = html.P(
     'Start by uploading a .csv file containing at least a numerical column and a date column with headers.',
@@ -467,6 +487,18 @@ def toggle_preview_collapse(n_clicks, is_open):
 
 
 @app.callback(
+    Output('sidebar-offcanvas', 'is_open'),
+    Input('sidebar-toggle', 'n_clicks'),
+    State('sidebar-offcanvas', 'is_open'),
+    prevent_initial_call=True,
+)
+def toggle_mobile_sidebar(n_clicks, is_open):
+    if not n_clicks:
+        raise PreventUpdate
+    return not is_open
+
+
+@app.callback(
     Output('run-button', 'children', allow_duplicate=True),
     Input('raw-data-store', 'data'),
     prevent_initial_call=True,
@@ -726,6 +758,7 @@ def toggle_plot_modal(open_clicks, close_clicks, is_open, image_src):
 
 content_div = html.Div([title_row,
                         html.Div(className='title-underline'),
+                        sidebar_toggle_button,
                         instructions_row,
                         file_upload,
                         table_preview,
@@ -745,7 +778,8 @@ app.layout = html.Div(children=[sidebar,
                                 results_store,
                                 job_store,
                                 job_interval,
-                                plot_modal])
+                                plot_modal,
+                                mobile_sidebar])
 
 
 if __name__ == '__main__':
