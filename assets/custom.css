@@ -1,24 +1,64 @@
+:root {
+  --app-bg: #f3f5f9;
+  --text-color: #1f2937;
+  --card-bg: #ffffff;
+  --label-color: #1f2937;
+  --subtitle-color: #6b7280;
+  --hint-color: #6b7280;
+  --grid-header-bg: #eef2ff;
+  --border-color: rgba(15, 23, 42, 0.08);
+  --input-bg: #ffffff;
+  --input-border: rgba(15, 23, 42, 0.2);
+  --input-text: #1f2937;
+  --accent-color: #4f46e5;
+  --accent-soft: rgba(79, 70, 229, 0.12);
+}
+
 body {
   font-family: 'Play', 'Segoe UI', sans-serif;
-  background-color: #f3f5f9;
-  color: #1f2937;
+  background-color: var(--app-bg);
+  color: var(--text-color);
+}
+
+body.dark-mode {
+  --app-bg: #111827;
+  --text-color: #e8ecf9;
+  --card-bg: #1b2538;
+  --label-color: #f5f7ff;
+  --subtitle-color: #b5c1dd;
+  --hint-color: #93a5c6;
+  --grid-header-bg: #22314e;
+  --border-color: rgba(231, 239, 255, 0.12);
+  --input-bg: #1f2b3f;
+  --input-border: rgba(231, 239, 255, 0.22);
+  --input-text: #e8ecf9;
+  --accent-color: #7c8fff;
+  --accent-soft: rgba(124, 143, 255, 0.18);
 }
 
 .content-wrapper {
   max-width: 1200px;
 }
 
+.top-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+}
+
 .page-title {
   font-weight: 700;
   font-size: 2.2rem;
   margin-bottom: 0.5rem;
-  color: #1f2a44;
+  color: var(--text-color);
 }
 
 .page-subtitle {
   font-size: 1.05rem;
   max-width: 720px;
-  color: #4b5563;
+  color: var(--subtitle-color);
   margin-bottom: 1.5rem;
 }
 
@@ -39,7 +79,7 @@ body {
 .upload-card,
 .parameters-card,
 .card-section {
-  background-color: #ffffff;
+  background-color: var(--card-bg, #ffffff);
   border-radius: 16px;
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
   padding: 1.5rem;
@@ -47,7 +87,7 @@ body {
 }
 
 .table-card {
-  background-color: #ffffff;
+  background-color: var(--card-bg, #ffffff);
   border-radius: 16px;
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
   padding: 1.5rem;
@@ -63,13 +103,21 @@ body {
 }
 
 .sidebar-toggle-button {
-  margin-bottom: 1rem;
   font-weight: 600;
   border-radius: 999px;
 }
 
 .sidebar-toggle-button.sidebar-toggle-button {
   box-shadow: none;
+}
+
+.theme-toggle-button {
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.theme-toggle-button {
+  border-radius: 999px;
 }
 
 .collapsible-card .card-body {
@@ -88,18 +136,17 @@ body {
   align-items: center;
   justify-content: space-between;
   font-weight: 700;
-  color: #1f2a44;
+  color: var(--label-color);
   padding: 0;
   border: none;
   background: transparent;
-    text-decoration: none;
-
+  text-decoration: none;
 }
 
 .card-toggle-button:hover,
 .card-toggle-button:focus {
   text-decoration: none;
-  color: #4338ca;
+  color: var(--accent-color);
   box-shadow: none;
 }
 
@@ -114,23 +161,23 @@ body {
 }
 
 .upload-container {
-  border: 2px dashed rgba(79, 70, 229, 0.4);
+  border: 2px dashed var(--accent-color);
   border-radius: 14px;
   padding: 1.75rem;
   text-align: center;
   transition: border 0.3s ease, background 0.3s ease;
   cursor: pointer;
-  background-color: rgba(79, 70, 229, 0.05);
+  background-color: var(--accent-soft);
 }
 
 .upload-container:hover {
-  border-color: #4f46e5;
-  background-color: rgba(79, 70, 229, 0.08);
+  border-color: var(--accent-color);
+  background-color: rgba(79, 70, 229, 0.12);
 }
 
 .upload-box {
   font-weight: 600;
-  color: #4338ca;
+  color: var(--accent-color);
 }
 
 .parameters-card .parameter-row {
@@ -154,7 +201,59 @@ body {
 .parameters-card label {
   font-weight: 600;
   margin-bottom: 0.35rem;
-  color: #1f2937;
+  color: var(--label-color, #1f2937);
+}
+
+.form-control,
+.form-control::placeholder,
+.dbc-input,
+.dbc-select,
+.dbc-textarea,
+.dash-input,
+.dash-textarea,
+.Select-control {
+  background-color: var(--input-bg);
+  color: var(--input-text);
+  border-color: var(--input-border);
+  box-shadow: none;
+}
+
+is-open > .Select-control {
+  background-color: var(--input-bg);
+  color: var(--input-text);
+  border-color: var(--input-border);
+  box-shadow: 0 0 0 0.2rem rgba(79, 70, 229, 0.15);
+}
+
+.form-control:focus,
+.dbc-input:focus,
+.dbc-textarea:focus,
+.dash-input:focus,
+.dash-textarea:focus,
+.Select-control:focus {
+  background-color: var(--input-bg);
+  color: var(--input-text);
+  box-shadow: 0 0 0 0.2rem rgba(79, 70, 229, 0.15);
+}
+
+.Select-placeholder,
+.Select-value-label,
+.Select-value-label span,
+.Select-value,
+.Select-value span,
+.Select-arrow-zone,
+.Select-arrow {
+  color: var(--input-text) !important;
+}
+
+.Select-menu-outer,
+.Select-option {
+  background-color: var(--card-bg);
+  color: var(--input-text);
+}
+
+.Select-option.is-focused {
+  background-color: var(--accent-soft);
 }
 
 .run-button {
@@ -211,7 +310,7 @@ body {
 }
 
 .plot-hint {
-  color: #6b7280;
+  color: var(--hint-color, #6b7280);
   display: block;
 }
 
@@ -229,7 +328,7 @@ body {
 }
 
 .card-subtitle {
-  color: #6b7280;
+  color: var(--subtitle-color);
   margin-bottom: 1.25rem;
 }
 
@@ -280,11 +379,12 @@ body {
 }
 
 .compact-ag-theme.ag-theme-alpine {
-  --ag-background-color: #ffffff;
-  --ag-foreground-color: #1f2937;
-  --ag-secondary-foreground-color: #4b5563;
+  --ag-background-color: var(--card-bg, #ffffff);
+  --ag-foreground-color: var(--text-color, #1f2937);
+  --ag-odd-row-background-color: var(--card-bg, #ffffff);
+  --ag-secondary-foreground-color: var(--hint-color, #4b5563);
   --ag-border-color: rgba(15, 23, 42, 0.08);
-  --ag-header-background-color: #eef2ff;
+  --ag-header-background-color: var(--grid-header-bg, #eef2ff);
   --ag-row-hover-color: rgba(79, 70, 229, 0.08);
   --ag-selected-row-background-color: rgba(79, 70, 229, 0.12);
   border-radius: 12px;
@@ -318,6 +418,20 @@ body {
   max-height: 500px;
   object-fit: contain;
   cursor: zoom-in;
+}
+
+.dark-mode {
+  --app-bg: #101522;
+  --text-color: #e5edff;
+  --card-bg: #182033;
+  --label-color: #e5edff;
+  --subtitle-color: #a5b4d4;
+  --hint-color: #93a5c6;
+  --grid-header-bg: #1f2a44;
+}
+
+.dark-mode body {
+  background-color: var(--app-bg);
 }
 
 @media (max-width: 992px) {

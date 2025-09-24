@@ -106,6 +106,7 @@ data_memory_store = dcc.Store(id='data-memory-store')
 results_store = dcc.Store(id='results-store', data=None)
 job_store = dcc.Store(id='job-store', data=None)
 job_interval = dcc.Interval(id='job-interval', interval=.5 * 1000, disabled=True)
+theme_store = dcc.Store(id='theme-store', data='light')
 
 
 def build_progress_content(progress=None):
@@ -154,13 +155,22 @@ def build_column_defs(df: pd.DataFrame):
 
 title_row = html.H2('Scale dependent correlation analysis App', className='page-title')
 
-sidebar_toggle_button = dbc.Button(
-    '☰ Menu',
-    id='sidebar-toggle',
-    color='light',
-    className='sidebar-toggle-button d-lg-none',
-    n_clicks=0
-)
+sidebar_toggle_button = html.Div([
+    dbc.Button(
+        '☰ Menu',
+        id='sidebar-toggle',
+        color='light',
+        className='sidebar-toggle-button d-lg-none',
+        n_clicks=0
+    ),
+    dbc.Button(
+        id='theme-toggle',
+        color='light',
+        className='theme-toggle-button d-sm-inline-flex',
+        n_clicks=0,
+        children='🌙 Dark',
+    )
+], className='top-controls')
 
 instructions_row = html.P(
     'Start by uploading a .csv file containing at least a numerical column and a date column with headers.',
@@ -368,9 +378,9 @@ def parse_contents(contents, filename):
                Output('results-container', 'hidden'),
                Output('run-button', 'disabled', allow_duplicate=True),
                Output('update-plot-button', 'disabled', allow_duplicate=True),
+               Output('plot-feedback', 'children', allow_duplicate=True),
                Output('upload-card-title', 'children'),
                Output('preview-card-title', 'children'),
-               Output('plot-feedback', 'children', allow_duplicate=True),
                Output('output-data-upload', 'children')],
              Input('upload-data', 'contents'),
              State('upload-data', 'filename'),
@@ -380,7 +390,7 @@ def update_output(content, filename):
         data, error = parse_contents(content, filename)
         if error is not None:
             return (no_update, no_update, no_update, no_update,
-                    True,  # upload-data children placeholder
+                    no_update,
                     True,  # parameters card hidden
                     True,  # plot card hidden
                     True,  # run button container hidden
@@ -388,10 +398,10 @@ def update_output(content, filename):
                     True,  # progress container hidden
                     True,  # results container hidden
                     True,  # run button disabled
-                    True,  # update plot disabled
+                    True,  # update plot button disabled
+                    None,  # clear feedback
                     'Upload Dataset',
                     'Dataset Preview',
-                    [],
                     error)
         df = pd.DataFrame(data)
         grid_df = df.copy()
@@ -414,11 +424,11 @@ def update_output(content, filename):
                 True,   # progress container hidden
                 True,   # results container hidden
                 False,  # run button enabled
-                True,   # update plot disabled until results exist
+                True,   # keep update plot disabled until results exist
+                None,   # clear feedback message
                 f'Uploaded dataset: {filename}',
-                f'Dataset Preview – {len(df):,} rows and {len(df.columns):,} columns',
-                [],
-                [])
+                f'Dataset Preview – {len(df):,} rows × {len(df.columns):,} columns (first 10 shown)',
+                None)
     else:
         raise PreventUpdate
 
@@ -496,6 +506,35 @@ def toggle_mobile_sidebar(n_clicks, is_open):
     if not n_clicks:
         raise PreventUpdate
     return not is_open
+
+
+@app.callback(
+    Output('theme-store', 'data'),
+    Output('theme-toggle', 'children'),
+    Input('theme-toggle', 'n_clicks'),
+    State('theme-store', 'data'),
+    prevent_initial_call=True,
+)
+def toggle_theme(n_clicks, current):
+    if not n_clicks:
+        raise PreventUpdate
+    new_theme = 'dark' if current == 'light' else 'light'
+    button_label = '☀ Light' if new_theme == 'dark' else '🌙 Dark'
+    return new_theme, button_label
+
+
+app.clientside_callback(
+    """
+    function(theme){
+        if(!theme){return ''}
+        document.body.classList.remove('light-mode','dark-mode');
+        document.body.classList.add(theme + '-mode');
+        return '';
+    }
+    """,
+    Output('theme-sync', 'children'),
+    Input('theme-store', 'data')
+)
 
 
 @app.callback(
@@ -771,7 +810,9 @@ content_div = html.Div([title_row,
                        style=CONTENT_STYLE,
                        className='content-wrapper')
 
-app.layout = html.Div(children=[sidebar,
+app.layout = html.Div(children=[
+                                theme_store,
+                                sidebar,
                                 content_div,
                                 raw_data_store,
                                 data_memory_store,
@@ -779,7 +820,9 @@ app.layout = html.Div(children=[sidebar,
                                 job_store,
                                 job_interval,
                                 plot_modal,
-                                mobile_sidebar])
+                                mobile_sidebar,
+                                html.Div(id='theme-sync', style={'display': 'none'})
+                                ])
 
 
 if __name__ == '__main__':
