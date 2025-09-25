@@ -427,7 +427,7 @@ def update_output(content, filename):
                 True,   # keep update plot disabled until results exist
                 None,   # clear feedback message
                 f'Uploaded dataset: {filename}',
-                f'Dataset Preview – {len(df):,} rows × {len(df.columns):,} columns (first 10 shown)',
+                f'Dataset Preview – {len(df):,} rows × {len(df.columns):,} columns',
                 None)
     else:
         raise PreventUpdate
@@ -688,11 +688,11 @@ def manage_job(job_data, _):
         download_button = dbc.Button('Download Results Table', id='download-button', color='secondary')
 
         results_children = [
-            dcc.Markdown('### SDC Analysis Results'),
-            html.Div([
+            dbc.Row([dbc.Col(dcc.Markdown('### SDC Analysis Results')),
+            dbc.Col(html.Div([
                 download_button,
                 dcc.Download(id='download-results-xlsx')
-            ], className='results-actions'),
+            ], className='results-actions'))], justify='between'),
             html.Small('Click the plot to open a large preview.', className='plot-hint'),
             image_div,
         ]

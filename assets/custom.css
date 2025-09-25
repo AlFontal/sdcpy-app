@@ -23,11 +23,12 @@ body {
 body.dark-mode {
   --app-bg: #111827;
   --text-color: #e8ecf9;
-  --card-bg: #1b2538;
+  --card-bg: #26344e;
   --label-color: #f5f7ff;
   --subtitle-color: #b5c1dd;
   --hint-color: #93a5c6;
   --grid-header-bg: #22314e;
+  --hint-color: #93a5c6;
   --border-color: rgba(231, 239, 255, 0.12);
   --input-bg: #1f2b3f;
   --input-border: rgba(231, 239, 255, 0.22);
@@ -60,6 +61,10 @@ body.dark-mode {
   max-width: 720px;
   color: var(--subtitle-color);
   margin-bottom: 1.5rem;
+}
+
+.section-title {
+  color: var(--text-color);
 }
 
 .title-underline {
@@ -277,7 +282,9 @@ is-open > .Select-control {
 .update-plot-button {
   border-radius: 999px;
   padding: 0.5rem 1.5rem;
+  color: var(--text-color);
 }
+
 
 .results-actions {
   display: flex;
@@ -452,6 +459,6 @@ is-open > .Select-control {
 }
 
 .plot-hint {
-  color: #6b7280;
+  color: var(--hint-color, #6b7280);
   display: block;
 }
