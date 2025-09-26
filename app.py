@@ -1,18 +1,19 @@
 import io
 import os
-import base64
 import dash
+import tasks
+import redis
+import base64
 
 import pandas as pd
+import dash_ag_grid as dag
 import dash_bootstrap_components as dbc
-import redis
+
 from rq import Queue
 from rq.job import Job
 from rq.exceptions import NoSuchJobError
 
 from dash import html, dcc, no_update
-import dash_ag_grid as dag
-import tasks
 from whitenoise import WhiteNoise
 from dash.exceptions import PreventUpdate
 from dash.dependencies import Output, Input, State, ALL
@@ -211,6 +212,8 @@ def sanitize_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             'invalid_examples': [],
             'sample_value': None,
             'parsed_example': None,
+            'sample_values': [],
+            'parsed_examples': [],
             'suggested_format': None,
         }
 
@@ -218,12 +221,14 @@ def sanitize_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             info['status'] = 'datetime'
             info['valid_count'] = int(series.notna().sum())
             non_null = series.dropna()
-            sample_val = non_null.iloc[0] if not non_null.empty else None
-            if sample_val is not None:
-                info['sample_value'] = str(sample_val)
-                if hasattr(sample_val, 'strftime'):
-                    info['parsed_example'] = sample_val.strftime('%Y-%m-%d %H:%M:%S')
-            info['suggested_format'] = '%Y-%m-%d %H:%M:%S'
+            samples = non_null.head(5)
+            if not samples.empty:
+                info['sample_values'] = [str(val) for val in samples]
+                parsed_samples = [val.strftime('%Y-%m-%d') if hasattr(val, 'strftime') else str(val) for val in samples]
+                info['parsed_examples'] = parsed_samples
+                info['sample_value'] = info['sample_values'][0]
+                info['parsed_example'] = info['parsed_examples'][0]
+            info['suggested_format'] = '%Y-%m-%d'
             report['date_columns'].append(info)
             continue
 
@@ -246,8 +251,18 @@ def sanitize_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             parsed_example = parsed_non_null.iloc[0] if not parsed_non_null.empty else None
             info['sample_value'] = str(sample_original) if sample_original is not None else None
             if parsed_example is not None:
-                info['parsed_example'] = parsed_example.strftime('%Y-%m-%d %H:%M:%S')
+                info['parsed_example'] = parsed_example.strftime('%Y-%m-%d')
                 info['suggested_format'] = _infer_datetime_format(info['sample_value']) or ''
+
+            if not parsed_non_null.empty:
+                aligned = series.loc[parsed_non_null.index].head(5)
+                parsed_samples = parsed_non_null.head(5)
+                info['sample_values'] = [str(val) for val in aligned]
+                info['parsed_examples'] = [val.strftime('%Y-%m-%d') for val in parsed_samples]
+                if info['sample_values']:
+                    info['sample_value'] = info['sample_values'][0]
+                if info['parsed_examples']:
+                    info['parsed_example'] = info['parsed_examples'][0]
 
             if ratio >= 0.5:
                 df[col] = parsed
@@ -341,9 +356,23 @@ def build_date_review_body(report: dict | None,
 
     for info in relevant:
         col = info['column']
-        original_sample = info.get('sample_value') or '—'
-        parsed_example = info.get('parsed_example') or '—'
         suggested_format = overrides.get(col) or info.get('suggested_format') or ''
+        sample_pairs = list(zip(info.get('sample_values') or [], info.get('parsed_examples') or []))
+
+        if sample_pairs:
+            samples_list = html.Ul(
+                [
+                    html.Li([
+                        html.Code(original if original else '—'),
+                        html.Span(' → ', className='mx-1'),
+                        html.Code(parsed if parsed else '—')
+                    ])
+                    for original, parsed in sample_pairs
+                ],
+                className='mb-0 date-sample-list'
+            )
+        else:
+            samples_list = html.P('No parsed examples available yet.', className='text-muted mb-0')
 
         rows.append(
             dbc.Row(
@@ -352,26 +381,19 @@ def build_date_review_body(report: dict | None,
                         [
                             html.Strong(col),
                             html.Br(),
-                            html.Small(f'Original sample: {original_sample}', className='text-muted'),
+                            html.Small('First 5 parsed examples', className='text-muted'),
                         ],
                         width=4,
                     ),
                     dbc.Col(
-                        [
-                            html.Div(
-                                [
-                                    html.Small('Interpreted as:', className='text-muted d-block'),
-                                    html.Code(parsed_example, className='d-block'),
-                                ]
-                            )
-                        ],
+                        samples_list,
                         width=4,
                     ),
                     dbc.Col(
                         [
                             dbc.Input(
                                 id={'type': 'date-format-input', 'column': col},
-                                placeholder='e.g. %Y-%m-%d %H:%M:%S',
+                                placeholder='e.g. %Y-%m-%d',
                                 value=suggested_format,
                                 debounce=True,
                             ),
@@ -721,7 +743,7 @@ def update_output(content, filename):
             True,   # update plot button disabled until results exist
             None,   # clear feedback message
             f'Uploaded dataset: {filename}',
-            f'Dataset Preview – {len(sanitized_df):,} rows × {len(sanitized_df.columns):,} columns (first 10 shown)',
+            f'Dataset Preview – {len(sanitized_df):,} rows × {len(sanitized_df.columns):,} columns',
             sanitization_alert,
             report,
             )
