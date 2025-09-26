@@ -53,6 +53,7 @@ def _serialize_analysis(analysis: sdc.SDCAnalysis, ts1_label: str, ts2_label: st
         "min_lag": min_lag_serial,
         "max_lag": max_lag_serial,
         "n_permutations": getattr(analysis, "n_permutations", None),
+        "permutations": bool(getattr(analysis, "permutations", False)),
         "ts1": _serialize_series(analysis.ts1),
         "ts2": _serialize_series(analysis.ts2),
         "ts1_label": ts1_label,
@@ -82,7 +83,8 @@ def _deserialize_analysis(payload: Dict[str, Any]) -> sdc.SDCAnalysis:
         min_lag=min_lag,
         max_lag=max_lag,
         sdc_df=sdc_df,
-        n_permutations=payload.get("n_permutations") or 99,
+        n_permutations=payload.get("n_permutations") or 100,
+        permutations=payload.get("permutations", False)
     )
 
 
@@ -301,9 +303,10 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
             (self.sdc_df
             .loc[lambda dd: dd.p_value < alpha]
             .loc[lambda dd: (dd.lag <= max_lag) & (dd.lag >= min_lag)]
-            .groupby('date_1')
-            .apply(lambda dd: dd.loc[dd['r'].abs() == dd['r'].abs().max()].loc[lambda d: d['lag'] == d['lag'].min()])
-            .reset_index(drop=True)
+            # We keep this uglyly commented here in case we want to revert to this method of calculating max correlations
+            # .groupby('date_1')
+            # .apply(lambda dd: dd.loc[dd['r'].abs() == dd['r'].abs().max()].loc[lambda d: d['lag'] == d['lag'].min()])
+            # .reset_index(drop=True)
             .groupby('date_1')
             .agg(r_max=('r', lambda x: x.where(x > 0).max()), r_min=('r', lambda x: abs(x.where(x < 0).min())))
             .rename(columns={'r_max': 'Max $r$', 'r_min': 'Min $r$ (abs)'})
@@ -395,12 +398,24 @@ def render_sdc_plot_from_payload(
     show_ts2: bool = True,
     plot_dpi: int = 300,
     figsize: tuple[float, float] = (7, 7),
+    min_lag_override: Optional[int] = None,
+    max_lag_override: Optional[int] = None,
 ) -> str:
     analysis = _deserialize_analysis(payload)
     min_lag = payload.get("min_lag")
     max_lag = payload.get("max_lag")
     min_lag = -np.inf if min_lag is None else float(min_lag)
     max_lag = np.inf if max_lag is None else float(max_lag)
+    if min_lag_override is not None:
+        try:
+            min_lag = int(min_lag_override)
+        except (TypeError, ValueError):
+            pass
+    if max_lag_override is not None:
+        try:
+            max_lag = int(max_lag_override)
+        except (TypeError, ValueError):
+            pass
     return _encode_plot(
         analysis,
         payload.get("ts1_label", "Time Series 1"),
@@ -461,11 +476,16 @@ def run_sdc_analysis(
     min_lag: int,
     max_lag: int,
     window: int,
+    n_permutations: Optional[int] = None,
     plot_title: Optional[str] = None,
     labels_fontsize: Optional[int] = None,
     plot_dpi: Optional[int] = None,
     show_colorbar: bool = True,
     show_ts2: bool = True,
+    plot_width: Optional[float] = None,
+    plot_height: Optional[float] = None,
+    plot_min_lag: Optional[int] = None,
+    plot_max_lag: Optional[int] = None,
 ) -> Dict[str, Any]:
     job = get_current_job()
     if job is not None:
@@ -484,6 +504,33 @@ def run_sdc_analysis(
         plot_title = plot_title.strip() if plot_title else None
         show_colorbar = bool(show_colorbar)
         show_ts2 = bool(show_ts2)
+        try:
+            n_permutations = int(n_permutations) if n_permutations is not None else 100
+        except (TypeError, ValueError):
+            n_permutations = 100
+        if n_permutations <= 0:
+            permutations_enabled = False
+            n_permutations = 100
+        else:
+            permutations_enabled = True
+        plot_width = float(plot_width) if plot_width else 7.0
+        plot_height = float(plot_height) if plot_height else 7.0
+        if plot_width <= 0:
+            plot_width = 7.0
+        if plot_height <= 0:
+            plot_height = 7.0
+
+        def _coerce_lag(value, fallback):
+            if value is None or value == "":
+                return fallback
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return fallback
+
+        plot_min_lag = _coerce_lag(plot_min_lag, min_lag)
+        plot_max_lag = _coerce_lag(plot_max_lag, max_lag)
+
         df = _build_analysis_dataframe(data, date_column)
         analysis = sdc.SDCAnalysis(
             ts1=df[ts1],
@@ -492,6 +539,8 @@ def run_sdc_analysis(
             min_lag=min_lag,
             max_lag=max_lag,
             fragment_size=fragment_size,
+            n_permutations=n_permutations,
+            permutations=permutations_enabled,
         )
 
         analysis_payload = _serialize_analysis(analysis, ts1, ts2, min_lag, max_lag)
@@ -499,13 +548,14 @@ def run_sdc_analysis(
             analysis,
             ts1,
             ts2,
-            min_lag,
-            max_lag,
+            plot_min_lag,
+            plot_max_lag,
             labels_fontsize=labels_fontsize,
             plot_title=plot_title,
             show_colorbar=show_colorbar,
             show_ts2=show_ts2,
             plot_dpi=plot_dpi,
+            figsize=(plot_width, plot_height),
         )
         excel_bytes = _build_excel_payload(analysis)
 
@@ -527,6 +577,12 @@ def run_sdc_analysis(
             "dpi": plot_dpi,
             "show_colorbar": show_colorbar,
             "show_ts2": show_ts2,
+            "width": plot_width,
+            "height": plot_height,
+            "min_lag": None if not math.isfinite(plot_min_lag) else plot_min_lag,
+            "max_lag": None if not math.isfinite(plot_max_lag) else plot_max_lag,
+            "n_permutations": n_permutations,
+            "permutations": permutations_enabled,
         }
 
         return {
@@ -539,6 +595,8 @@ def run_sdc_analysis(
                 "window": fragment_size,
                 "min_lag": summary_min,
                 "max_lag": summary_max,
+                "n_permutations": n_permutations,
+                "permutations": permutations_enabled,
                 "plot": plot_settings,
             },
         }

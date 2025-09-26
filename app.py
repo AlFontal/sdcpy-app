@@ -15,7 +15,12 @@ import dash_ag_grid as dag
 import tasks
 from whitenoise import WhiteNoise
 from dash.exceptions import PreventUpdate
-from dash.dependencies import Output, Input, State
+from dash.dependencies import Output, Input, State, ALL
+
+try:
+    from pandas.core.tools.datetimes import _guess_datetime_format
+except ImportError:  # pragma: no cover - fallback for pandas API changes
+    _guess_datetime_format = None  # type: ignore
 
 app = dash.Dash(
     external_stylesheets=[
@@ -63,6 +68,9 @@ DEFAULT_PARAMS = {
     'method': 'pearson',
     'labels_fontsize': 6,
     'plot_dpi': 300,
+    'n_permutations': 100,
+    'plot_width': 7.0,
+    'plot_height': 7.0,
 }
 
 sidebar_content = html.Div(
@@ -107,6 +115,7 @@ results_store = dcc.Store(id='results-store', data=None)
 job_store = dcc.Store(id='job-store', data=None)
 job_interval = dcc.Interval(id='job-interval', interval=.5 * 1000, disabled=True)
 theme_store = dcc.Store(id='theme-store', data='light')
+date_report_store = dcc.Store(id='date-report-store', data=None)
 
 
 def build_progress_content(progress=None):
@@ -153,6 +162,229 @@ def build_column_defs(df: pd.DataFrame):
     return column_defs
 
 
+def _infer_datetime_format(sample: str | None) -> str | None:
+    """Best-effort inference of a strptime-compatible format string for display."""
+
+    if not sample or not isinstance(sample, str):
+        return None
+
+    if _guess_datetime_format is None:  # pandas API fallback
+        return None
+
+    for dayfirst in (False, True):
+        try:
+            fmt = _guess_datetime_format(sample, dayfirst=dayfirst, default=None)
+        except TypeError:  # pragma: no cover - signature may differ across pandas
+            fmt = _guess_datetime_format(sample)
+        except Exception:
+            fmt = None
+        if fmt:
+            return fmt
+    return None
+
+
+def sanitize_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    report = {
+        'dropped_columns': [],
+        'date_columns': []
+    }
+
+    # Trim column names and drop duplicates keeping first occurrence
+    df.columns = [col.strip() if isinstance(col, str) else col for col in df.columns]
+    df = df.loc[:, ~pd.Index(df.columns).duplicated()]
+
+    # Drop columns that are entirely empty
+    empty_cols = df.columns[df.isna().all()].tolist()
+    if empty_cols:
+        report['dropped_columns'] = empty_cols
+        df = df.drop(columns=empty_cols)
+
+    # Detect datetime-like columns
+    for col in df.columns:
+        series = df[col]
+        info = {
+            'column': col,
+            'status': 'unchanged',
+            'valid_count': 0,
+            'total_count': int(len(series)),
+            'invalid_count': 0,
+            'invalid_examples': [],
+            'sample_value': None,
+            'parsed_example': None,
+            'suggested_format': None,
+        }
+
+        if pd.api.types.is_datetime64_any_dtype(series):
+            info['status'] = 'datetime'
+            info['valid_count'] = int(series.notna().sum())
+            non_null = series.dropna()
+            sample_val = non_null.iloc[0] if not non_null.empty else None
+            if sample_val is not None:
+                info['sample_value'] = str(sample_val)
+                if hasattr(sample_val, 'strftime'):
+                    info['parsed_example'] = sample_val.strftime('%Y-%m-%d %H:%M:%S')
+            info['suggested_format'] = '%Y-%m-%d %H:%M:%S'
+            report['date_columns'].append(info)
+            continue
+
+        if pd.api.types.is_string_dtype(series) or series.dtype == object:
+            parsed = pd.to_datetime(series, errors='coerce', infer_datetime_format=True)
+            valid_count = int(parsed.notna().sum())
+            if valid_count == 0:
+                continue
+
+            ratio = valid_count / len(parsed)
+            info['valid_count'] = valid_count
+            invalid_mask = parsed.isna() & series.notna()
+            invalid_rows = invalid_mask[invalid_mask].index.tolist()
+            info['invalid_count'] = len(invalid_rows)
+            if info['invalid_count']:
+                info['invalid_examples'] = [int(i) + 1 for i in invalid_rows[:5]]
+
+            parsed_non_null = parsed.dropna()
+            sample_original = series[parsed.notna()].iloc[0] if valid_count else None
+            parsed_example = parsed_non_null.iloc[0] if not parsed_non_null.empty else None
+            info['sample_value'] = str(sample_original) if sample_original is not None else None
+            if parsed_example is not None:
+                info['parsed_example'] = parsed_example.strftime('%Y-%m-%d %H:%M:%S')
+                info['suggested_format'] = _infer_datetime_format(info['sample_value']) or ''
+
+            if ratio >= 0.5:
+                df[col] = parsed
+                info['status'] = 'converted'
+            else:
+                info['status'] = 'skipped'
+
+            report['date_columns'].append(info)
+
+    return df, report
+
+
+def build_sanitization_alert(report: dict):
+    messages = []
+
+    dropped = report.get('dropped_columns') or []
+    if dropped:
+        messages.append(html.Li(f"Dropped empty columns: {', '.join(dropped)}"))
+
+    for info in report.get('date_columns', []):
+        col = info['column']
+        status = info['status']
+        valid = info['valid_count']
+        total = info['total_count']
+        invalid = info['invalid_count']
+        examples = info.get('invalid_examples') or []
+
+        if status == 'converted':
+            msg = f"Column `{col}` parsed as datetime ({valid}/{total} values)."
+            if invalid:
+                sample = ', '.join(map(str, examples))
+                remaining = invalid - len(examples)
+                extra = f" (+{remaining} more)" if remaining > 0 else ''
+                msg += f" {invalid} value(s) could not be parsed{extra}. Example rows: {sample}."
+        elif status == 'skipped':
+            msg = f"Column `{col}` left as text ({valid}/{total} values resembled dates)."
+            if invalid:
+                sample = ', '.join(map(str, examples))
+                msg += f" Example rows treated as non-dates: {sample}."
+        elif status == 'datetime':
+            msg = f"Column `{col}` detected as datetime."
+        else:
+            continue
+
+        messages.append(html.Li(msg))
+
+    if not messages:
+        return []
+
+    alert_body = [
+        html.Strong('Import notes'),
+        html.Ul(messages, className='mb-0')
+    ]
+
+    return dbc.Alert(alert_body, color='info', className='mt-3', dismissable=True)
+
+
+def build_date_review_body(report: dict | None,
+                           overrides: dict[str, str] | None = None,
+                           errors: dict[str, str] | None = None) -> list:
+    """Render modal content for reviewing inferred date formats."""
+
+    overrides = overrides or {}
+    errors = errors or {}
+
+    if not report:
+        return [html.P('No datetime-like columns detected.', className='mb-0')]
+
+    relevant = [info for info in report.get('date_columns', [])
+                if info.get('status') in {'converted', 'datetime'}]
+
+    if not relevant:
+        return [html.P('No datetime-like columns detected.', className='mb-0')]
+
+    rows: list = [
+        html.P(
+            'Review the detected date columns. Adjust the format below if the interpretation looks wrong. '
+            'Use Python strftime directives (e.g. %d/%m/%Y).',
+            className='text-muted'
+        )
+    ]
+
+    if errors:
+        error_messages = [html.Li(f"{col}: {message}") for col, message in errors.items()]
+        rows.append(
+            dbc.Alert([
+                html.Strong('Some overrides could not be applied.'),
+                html.Ul(error_messages, className='mb-0')
+            ], color='danger')
+        )
+
+    for info in relevant:
+        col = info['column']
+        original_sample = info.get('sample_value') or '—'
+        parsed_example = info.get('parsed_example') or '—'
+        suggested_format = overrides.get(col) or info.get('suggested_format') or ''
+
+        rows.append(
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.Strong(col),
+                            html.Br(),
+                            html.Small(f'Original sample: {original_sample}', className='text-muted'),
+                        ],
+                        width=4,
+                    ),
+                    dbc.Col(
+                        [
+                            html.Div(
+                                [
+                                    html.Small('Interpreted as:', className='text-muted d-block'),
+                                    html.Code(parsed_example, className='d-block'),
+                                ]
+                            )
+                        ],
+                        width=4,
+                    ),
+                    dbc.Col(
+                        [
+                            dbc.Input(
+                                id={'type': 'date-format-input', 'column': col},
+                                placeholder='e.g. %Y-%m-%d %H:%M:%S',
+                                value=suggested_format,
+                                debounce=True,
+                            ),
+                            html.Small('Leave blank to keep the inferred format.', className='text-muted'),
+                        ],
+                        width=4,
+                    ),
+                ],
+                className='mb-3 align-items-center date-review-row'
+            )
+        )
+
+    return rows
 title_row = html.H2('Scale dependent correlation analysis App', className='page-title')
 
 sidebar_toggle_button = html.Div([
@@ -194,18 +426,28 @@ parameter_card = dbc.Card(
     dbc.CardBody([
         html.H4('SDC Parameters', className='section-title'),
         dbc.Row([
+            dbc.Col([html.Label('Date Column'), date_dropdown], className='parameter-col'),
             dbc.Col([html.Label('Time Series 1'), ts1_dropdown], className='parameter-col'),
             dbc.Col([html.Label('Time Series 2'), ts2_dropdown], className='parameter-col'),
-            dbc.Col([html.Label('Date Column'), date_dropdown], className='parameter-col'),
+            dbc.Col([html.Label('Corr. Method'), method_dropdown], className='parameter-col'),
         ], className='parameter-row'),
         dbc.Row([
-            dbc.Col([html.Label('Corr. Method'), method_dropdown], className='parameter-col'),
             dbc.Col([html.Label('Min Lag'),
                      dbc.Input(id='min-lag', placeholder='Default: -inf', type='number')], className='parameter-col'),
             dbc.Col([html.Label('Max Lag'),
                      dbc.Input(id='max-lag', placeholder='Default: inf', type='number')], className='parameter-col'),
             dbc.Col([html.Label('Window Size (s)'),
                      dbc.Input(id='window', placeholder='Select window size', type='number', min=0)], className='parameter-col'),
+            dbc.Col([
+                html.Label('Permutations (n)'),
+                dbc.Input(
+                    id='n-permutations',
+                    type='number',
+                    min=0,
+                    step=1,
+                    value=DEFAULT_PARAMS['n_permutations'],
+                ),
+            ], className='parameter-col', width=3),
         ], className='parameter-row'),
     ]),
     className='parameters-card'
@@ -223,6 +465,22 @@ plot_options_card = dbc.Card(
                     className='parameter-col', width=3),
             dbc.Col([html.Label('Plot DPI'),
                      dbc.Input(id='plot-dpi', type='number', min=72, value=300)],
+                    className='parameter-col', width=3),
+        ], className='parameter-row'),
+        dbc.Row([
+            dbc.Col([html.Label('Plot Width (in)'),
+                     dbc.Input(id='plot-width', type='number', min=1, step=0.5,
+                               value=DEFAULT_PARAMS['plot_width'])],
+                    className='parameter-col', width=3),
+            dbc.Col([html.Label('Plot Height (in)'),
+                     dbc.Input(id='plot-height', type='number', min=1, step=0.5,
+                               value=DEFAULT_PARAMS['plot_height'])],
+                    className='parameter-col', width=3),
+            dbc.Col([html.Label('Plot Min Lag'),
+                     dbc.Input(id='plot-min-lag', type='number', placeholder='Use analysis min lag')],
+                    className='parameter-col', width=3),
+            dbc.Col([html.Label('Plot Max Lag'),
+                     dbc.Input(id='plot-max-lag', type='number', placeholder='Use analysis max lag')],
                     className='parameter-col', width=3),
         ], className='parameter-row'),
         dbc.Row([
@@ -342,6 +600,21 @@ plot_modal = dbc.Modal(
     is_open=False,
 )
 
+date_review_modal = dbc.Modal(
+    [
+        dbc.ModalHeader(dbc.ModalTitle('Review detected date formats')), 
+        dbc.ModalBody(id='date-review-body'),
+        dbc.ModalFooter([
+            dbc.Button('Cancel', id='dismiss-date-review', color='secondary', className='me-2'),
+            dbc.Button('Confirm', id='confirm-date-review', color='primary'),
+        ]),
+    ],
+    id='date-review-modal',
+    is_open=False,
+    centered=True,
+    size='lg',
+)
+
 run_button = dbc.Button('Run SDC Analysis',
                         disabled=True,
                         color='primary',
@@ -355,14 +628,15 @@ def parse_contents(contents, filename):
     decoded = base64.b64decode(content_string)
     try:
         if filename and filename.lower().endswith('.csv'):
-            df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
-            return df.to_dict(orient='list'), None
-        return None, dbc.Alert('Unsupported file type. Please upload a .csv file.', color='warning')
+            original_df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+            sanitized_df, report = sanitize_dataframe(original_df.copy())
+            return sanitized_df, None, report, original_df
+        return None, dbc.Alert('Unsupported file type. Please upload a .csv file.', color='warning'), None, None
 
     except Exception as exc:
         print(exc)
         return None, dbc.Alert('There was an error processing this file. Please upload a valid .csv file.',
-                                color='danger')
+                                color='danger'), None, None
 
 
 @app.callback([Output('raw-data-store', 'data'),
@@ -381,56 +655,76 @@ def parse_contents(contents, filename):
                Output('plot-feedback', 'children', allow_duplicate=True),
                Output('upload-card-title', 'children'),
                Output('preview-card-title', 'children'),
-               Output('output-data-upload', 'children')],
+               Output('output-data-upload', 'children'),
+               Output('date-report-store', 'data')],
              Input('upload-data', 'contents'),
              State('upload-data', 'filename'),
              prevent_initial_call=True)
 def update_output(content, filename):
-    if content is not None:
-        data, error = parse_contents(content, filename)
-        if error is not None:
-            return (no_update, no_update, no_update, no_update,
-                    no_update,
-                    True,  # parameters card hidden
-                    True,  # plot card hidden
-                    True,  # run button container hidden
-                    True,  # divider hidden
-                    True,  # progress container hidden
-                    True,  # results container hidden
-                    True,  # run button disabled
-                    True,  # update plot button disabled
-                    None,  # clear feedback
-                    'Upload Dataset',
-                    'Dataset Preview',
-                    error)
-        df = pd.DataFrame(data)
-        grid_df = df.copy()
-        for col in grid_df.columns:
-            if pd.api.types.is_datetime64_any_dtype(grid_df[col]):
-                grid_df[col] = pd.to_datetime(grid_df[col]).dt.tz_localize(None).dt.strftime('%Y-%m-%d %H:%M:%S')
-
-        row_data = grid_df.fillna('').to_dict('records')
-        column_defs = build_column_defs(df)
-        serialized = df.to_dict('list')
-        return (serialized,
-                serialized,
-                row_data,
-                column_defs,
-                html.P(filename, className='upload-filename'),
-                False,  # parameters card visible
-                False,  # plot card visible
-                False,  # run button container visible
-                True,   # divider hidden until run starts
-                True,   # progress container hidden
-                True,   # results container hidden
-                False,  # run button enabled
-                True,   # keep update plot disabled until results exist
-                None,   # clear feedback message
-                f'Uploaded dataset: {filename}',
-                f'Dataset Preview – {len(df):,} rows × {len(df.columns):,} columns',
-                None)
-    else:
+    if content is None:
         raise PreventUpdate
+
+    sanitized_df, error, report, original_df = parse_contents(content, filename)
+    if error is not None:
+        return (
+            no_update,  # raw data
+            no_update,  # memory data
+            no_update,  # grid rows
+            no_update,  # grid columns
+            no_update,  # upload preview text
+            True,       # parameters card hidden
+            True,       # plot card hidden
+            True,       # run button container hidden
+            True,       # divider hidden
+            True,       # progress container hidden
+            True,       # results container hidden
+            True,       # run button disabled
+            True,       # update plot disabled
+            None,       # plot feedback cleared
+            'Upload Dataset',
+            'Dataset Preview',
+            error,
+            None,      # reset date report
+        )
+
+    grid_df = sanitized_df.copy()
+    for col in grid_df.columns:
+        if pd.api.types.is_datetime64_any_dtype(grid_df[col]):
+            grid_df[col] = pd.to_datetime(grid_df[col]).dt.tz_localize(None).dt.strftime('%Y-%m-%d %H:%M:%S')
+
+    row_data = grid_df.fillna('').to_dict('records')
+    column_defs = build_column_defs(sanitized_df)
+
+    serialized_df = sanitized_df.copy()
+    for col in serialized_df.columns:
+        if pd.api.types.is_datetime64_any_dtype(serialized_df[col]):
+            serialized_df[col] = serialized_df[col].dt.tz_localize(None).dt.strftime('%Y-%m-%d %H:%M:%S')
+    serialized_df = serialized_df.where(serialized_df.notna(), '')
+    serialized = serialized_df.to_dict('list')
+
+    original_serialized = original_df.where(original_df.notna(), None).to_dict('list')
+
+    sanitization_alert = build_sanitization_alert(report)
+
+    return (original_serialized,
+            serialized,
+            row_data,
+            column_defs,
+            html.P(filename, className='upload-filename'),
+            False,  # parameters card visible
+            False,  # plot card visible
+            False,  # run button container visible
+            True,   # divider hidden until run starts
+            True,   # progress container hidden
+            True,   # results container hidden
+            False,  # run button enabled
+            True,   # update plot button disabled until results exist
+            None,   # clear feedback message
+            f'Uploaded dataset: {filename}',
+            f'Dataset Preview – {len(sanitized_df):,} rows × {len(sanitized_df.columns):,} columns (first 10 shown)',
+            sanitization_alert,
+            report,
+            )
 
 
 @app.callback([Output('ts1-dropdown', 'options'),
@@ -444,6 +738,104 @@ def update_series(data):
         return options, options, options
     else:
         raise PreventUpdate
+
+
+@app.callback(
+    Output('date-review-modal', 'is_open'),
+    Output('date-review-body', 'children'),
+    Output('data-memory-store', 'data', allow_duplicate=True),
+    Output('data-grid', 'rowData', allow_duplicate=True),
+    Input('date-report-store', 'data'),
+    Input('dismiss-date-review', 'n_clicks'),
+    Input('confirm-date-review', 'n_clicks'),
+    State('date-review-modal', 'is_open'),
+    State('raw-data-store', 'data'),
+    State('data-memory-store', 'data'),
+    State({'type': 'date-format-input', 'column': ALL}, 'value'),
+    State({'type': 'date-format-input', 'column': ALL}, 'id'),
+    prevent_initial_call=True,
+)
+def manage_date_review_modal(report_data, dismiss_clicks, confirm_clicks, is_open, raw_data,
+                             sanitized_data, override_values, override_ids):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+    report_data = report_data or {}
+
+    def as_map(ids, values):
+        overrides = {}
+        for ctrl_id, value in zip(ids or [], values or []):
+            if not isinstance(ctrl_id, dict):
+                continue
+            column = ctrl_id.get('column')
+            if not column:
+                continue
+            if value is None:
+                continue
+            value_str = value.strip()
+            if value_str:
+                overrides[column] = value_str
+        return overrides
+
+    overrides_map = as_map(override_ids, override_values)
+
+    if trigger == 'date-report-store':
+        date_infos = report_data.get('date_columns') or []
+        has_relevant = any(info.get('status') in {'converted', 'datetime'} for info in date_infos)
+        body_children = build_date_review_body(report_data)
+        return has_relevant, body_children, dash.no_update, dash.no_update
+
+    if trigger == 'dismiss-date-review':
+        return False, dash.no_update, dash.no_update, dash.no_update
+
+    if trigger == 'confirm-date-review':
+        if raw_data is None or sanitized_data is None:
+            return False, dash.no_update, dash.no_update, dash.no_update
+
+        raw_df = pd.DataFrame(raw_data)
+        sanitized_df = pd.DataFrame(sanitized_data)
+
+        if raw_df.empty or not overrides_map:
+            return False, dash.no_update, dash.no_update, dash.no_update
+
+        errors: dict[str, str] = {}
+
+        for column, fmt in overrides_map.items():
+            if column not in raw_df.columns:
+                errors[column] = 'Column not found in the uploaded data.'
+                continue
+            try:
+                parsed = pd.to_datetime(raw_df[column], format=fmt, errors='coerce')
+            except Exception as exc:  # pragma: no cover - defensive guard
+                errors[column] = f'Failed to apply format ({exc}).'
+                continue
+
+            non_na = parsed.notna()
+            if non_na.sum() == 0 and raw_df[column].notna().sum() > 0:
+                errors[column] = 'Format does not match any sample values.'
+                continue
+
+            formatted = parsed.dt.strftime('%Y-%m-%d %H:%M:%S')
+            sanitized_df[column] = formatted.where(non_na, '')
+
+        if errors:
+            body_children = build_date_review_body(report_data, overrides_map, errors)
+            return True, body_children, dash.no_update, dash.no_update
+
+        sanitized_serialized = sanitized_df.where(sanitized_df.notna(), '').to_dict('list')
+
+        display_df = sanitized_df.copy()
+        for col in display_df.columns:
+            if pd.api.types.is_datetime64_any_dtype(display_df[col]):
+                display_df[col] = pd.to_datetime(display_df[col]).dt.tz_localize(None).dt.strftime('%Y-%m-%d %H:%M:%S')
+
+        row_data = display_df.fillna('').to_dict('records')
+
+        return False, dash.no_update, sanitized_serialized, row_data
+
+    raise PreventUpdate
 
 
 @app.callback(
@@ -558,15 +950,22 @@ def set_run_button_label(data):
     State('min-lag', 'value'),
     State('max-lag', 'value'),
     State('window', 'value'),
+    State('n-permutations', 'value'),
     State('plot-title', 'value'),
     State('label-fontsize', 'value'),
     State('plot-dpi', 'value'),
+    State('plot-width', 'value'),
+    State('plot-height', 'value'),
+    State('plot-min-lag', 'value'),
+    State('plot-max-lag', 'value'),
     State('plot-options', 'value'),
     State('data-memory-store', 'data'),
     prevent_initial_call=True,
 )
 def enqueue_sdc_job(n_clicks, ts1, ts2, date, method, min_lag, max_lag, window,
-                    plot_title, label_fontsize, plot_dpi, plot_options, data):
+                    n_permutations, plot_title, label_fontsize, plot_dpi,
+                    plot_width, plot_height, plot_min_lag, plot_max_lag,
+                    plot_options, data):
     if not n_clicks:
         raise PreventUpdate
 
@@ -597,6 +996,37 @@ def enqueue_sdc_job(n_clicks, ts1, ts2, date, method, min_lag, max_lag, window,
         plot_dpi = int(plot_dpi) if plot_dpi is not None else 300
     except (TypeError, ValueError):
         plot_dpi = 300
+
+    try:
+        n_permutations = int(n_permutations) if n_permutations not in (None, '') else DEFAULT_PARAMS['n_permutations']
+    except (TypeError, ValueError):
+        n_permutations = DEFAULT_PARAMS['n_permutations']
+    if n_permutations < 0:
+        n_permutations = DEFAULT_PARAMS['n_permutations']
+
+    def _coerce_positive_float(value, default):
+        try:
+            if value in (None, ''):
+                return default
+            value = float(value)
+        except (TypeError, ValueError):
+            return default
+        return value if value > 0 else default
+
+    plot_width = _coerce_positive_float(plot_width, DEFAULT_PARAMS['plot_width'])
+    plot_height = _coerce_positive_float(plot_height, DEFAULT_PARAMS['plot_height'])
+
+    def _coerce_optional_int(value):
+        if value in (None, ''):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    plot_min_lag = _coerce_optional_int(plot_min_lag)
+    plot_max_lag = _coerce_optional_int(plot_max_lag)
+
     plot_options = plot_options or []
     show_colorbar = 'colorbar' in plot_options
     show_ts2 = 'ts2' in plot_options
@@ -612,11 +1042,16 @@ def enqueue_sdc_job(n_clicks, ts1, ts2, date, method, min_lag, max_lag, window,
             min_lag,
             max_lag,
             window,
+            n_permutations,
             plot_title,
             label_fontsize,
             plot_dpi,
             show_colorbar,
             show_ts2,
+            plot_width,
+            plot_height,
+            plot_min_lag,
+            plot_max_lag,
         ),
         job_timeout=JOB_TIMEOUT,
         result_ttl=JOB_RESULT_TTL,
@@ -730,10 +1165,16 @@ def on_download_click(n_clicks, data):
     State('plot-title', 'value'),
     State('label-fontsize', 'value'),
     State('plot-dpi', 'value'),
+    State('plot-width', 'value'),
+    State('plot-height', 'value'),
+    State('plot-min-lag', 'value'),
+    State('plot-max-lag', 'value'),
     State('plot-options', 'value'),
     prevent_initial_call=True,
 )
-def on_update_plot(n_clicks, data, plot_title, label_fontsize, plot_dpi, plot_options):
+def on_update_plot(n_clicks, data, plot_title, label_fontsize, plot_dpi,
+                   plot_width, plot_height, plot_min_lag, plot_max_lag,
+                   plot_options):
     if not n_clicks:
         raise PreventUpdate
 
@@ -754,6 +1195,33 @@ def on_update_plot(n_clicks, data, plot_title, label_fontsize, plot_dpi, plot_op
     except (TypeError, ValueError):
         plot_dpi = DEFAULT_PARAMS['plot_dpi']
 
+    plot_settings = (data or {}).get('plot_settings', {})
+
+    def _coerce_positive_float(value, default):
+        try:
+            if value in (None, ''):
+                return default
+            value = float(value)
+        except (TypeError, ValueError):
+            return default
+        return value if value > 0 else default
+
+    width_default = plot_settings.get('width', DEFAULT_PARAMS['plot_width'])
+    height_default = plot_settings.get('height', DEFAULT_PARAMS['plot_height'])
+    plot_width = _coerce_positive_float(plot_width, width_default)
+    plot_height = _coerce_positive_float(plot_height, height_default)
+
+    def _coerce_optional_int(value, fallback=None):
+        if value in (None, ''):
+            return fallback
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    plot_min_lag = _coerce_optional_int(plot_min_lag, plot_settings.get('min_lag'))
+    plot_max_lag = _coerce_optional_int(plot_max_lag, plot_settings.get('max_lag'))
+
     plot_title_clean = plot_title.strip() if plot_title else None
 
     new_image = tasks.render_sdc_plot_from_payload(
@@ -763,6 +1231,9 @@ def on_update_plot(n_clicks, data, plot_title, label_fontsize, plot_dpi, plot_op
         show_colorbar=show_colorbar,
         show_ts2=show_ts2,
         plot_dpi=plot_dpi,
+        figsize=(plot_width, plot_height),
+        min_lag_override=plot_min_lag,
+        max_lag_override=plot_max_lag,
     )
 
     feedback = html.Span('Plot updated with the latest styling options.', className='plot-feedback-text')
@@ -816,10 +1287,12 @@ app.layout = html.Div(children=[
                                 content_div,
                                 raw_data_store,
                                 data_memory_store,
+                                date_report_store,
                                 results_store,
                                 job_store,
                                 job_interval,
                                 plot_modal,
+                                date_review_modal,
                                 mobile_sidebar,
                                 html.Div(id='theme-sync', style={'display': 'none'})
                                 ])
