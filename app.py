@@ -69,9 +69,10 @@ DEFAULT_PARAMS = {
     'method': 'pearson',
     'labels_fontsize': 6,
     'plot_dpi': 300,
-    'n_permutations': 100,
+    'n_permutations': 99,
     'plot_width': 7.0,
     'plot_height': 7.0,
+    'alpha': 0.05,
 }
 
 sidebar_content = html.Div(
@@ -135,7 +136,7 @@ def build_progress_content(progress=None):
         components.append(
             dbc.Progress(value=percent, label=f'{percent}%', striped=True, animated=True, className='my-2')
         )
-        components.append(dcc.Markdown(f'{current} / {total} iterations'))
+        components.append(dcc.Markdown(f'{current} / {total} fragment pairs'))
 
     return components
 
@@ -446,7 +447,7 @@ method_dropdown = dcc.Dropdown(options=[
 
 parameter_card = dbc.Card(
     dbc.CardBody([
-        html.H4('SDC Parameters', className='section-title'),
+        html.H4('SDC Analysis Parameters', className='section-title'),
         dbc.Row([
             dbc.Col([html.Label('Date Column'), date_dropdown], className='parameter-col'),
             dbc.Col([html.Label('Time Series 1'), ts1_dropdown], className='parameter-col'),
@@ -476,61 +477,79 @@ parameter_card = dbc.Card(
 )
 
 plot_options_card = dbc.Card(
-    dbc.CardBody([
-        html.H4('Plot Styling', className='section-title'),
-        dbc.Row([
-            dbc.Col([html.Label('Plot Title'),
-                     dbc.Input(id='plot-title', placeholder='Optional custom title', type='text')],
-                    className='parameter-col', width=6),
-            dbc.Col([html.Label('Label Font Size'),
-                     dbc.Input(id='label-fontsize', type='number', min=5, value=6)],
-                    className='parameter-col', width=3),
-            dbc.Col([html.Label('Plot DPI'),
-                     dbc.Input(id='plot-dpi', type='number', min=72, value=300)],
-                    className='parameter-col', width=3),
-        ], className='parameter-row'),
-        dbc.Row([
-            dbc.Col([html.Label('Plot Width (in)'),
-                     dbc.Input(id='plot-width', type='number', min=1, step=0.5,
-                               value=DEFAULT_PARAMS['plot_width'])],
-                    className='parameter-col', width=3),
-            dbc.Col([html.Label('Plot Height (in)'),
-                     dbc.Input(id='plot-height', type='number', min=1, step=0.5,
-                               value=DEFAULT_PARAMS['plot_height'])],
-                    className='parameter-col', width=3),
-            dbc.Col([html.Label('Plot Min Lag'),
-                     dbc.Input(id='plot-min-lag', type='number', placeholder='Use analysis min lag')],
-                    className='parameter-col', width=3),
-            dbc.Col([html.Label('Plot Max Lag'),
-                     dbc.Input(id='plot-max-lag', type='number', placeholder='Use analysis max lag')],
-                    className='parameter-col', width=3),
-        ], className='parameter-row'),
-        dbc.Row([
-            dbc.Col([
-                html.Label('Display Options'),
-                dbc.Checklist(
-                    id='plot-options',
-                    options=[
-                        {'label': 'Colorbar', 'value': 'colorbar'},
-                        {'label': 'Time Series 2', 'value': 'ts2'},
-                    ],
-                    value=['colorbar', 'ts2'],
-                    switch=True,
-                    inline=True,
-                    className='parameter-switch'
-                ),
-            ], className='parameter-col', width=12),
-        ], className='parameter-row'),
-        html.Div(
-            [
-                dbc.Button('Update Plot', id='update-plot-button', color='secondary', outline=True,
-                           className='update-plot-button', n_clicks=0, disabled=True),
-                html.Div(id='plot-feedback', className='plot-feedback')
-            ],
-            className='plot-actions'
+    [
+        dbc.CardHeader(
+            dbc.Button(
+                [
+                    html.Span('Plot Styling', id='plot-card-title', className='card-header-text'),
+                    html.Span('▾', id='plot-card-icon', className='card-toggle-icon'),
+                ],
+                id='toggle-plot-card',
+                color='link',
+                className='card-toggle-button',
+                n_clicks=0,
+            )
         ),
-    ]),
-    className='parameters-card'
+        dbc.Collapse(
+            dbc.CardBody([
+                dbc.Row([
+                    dbc.Col([html.Label('Label Font Size'),
+                             dbc.Input(id='label-fontsize', type='number', min=5, value=DEFAULT_PARAMS['labels_fontsize'])],
+                            className='parameter-col', width=4),
+                    dbc.Col([html.Label('Plot DPI'),
+                             dbc.Input(id='plot-dpi', type='number', min=72, value=DEFAULT_PARAMS['plot_dpi'])],
+                            className='parameter-col', width=4),
+                    dbc.Col([html.Label('Significance α'),
+                             dbc.Input(id='plot-alpha', type='number', min=0.001, max=0.5, step=0.001,
+                                       value=DEFAULT_PARAMS['alpha'])],
+                            className='parameter-col', width=4),
+                ], className='parameter-row'),
+                dbc.Row([
+                    dbc.Col([html.Label('Plot Width (in)'),
+                             dbc.Input(id='plot-width', type='number', min=1, step=0.5,
+                                       value=DEFAULT_PARAMS['plot_width'])],
+                            className='parameter-col', width=3),
+                    dbc.Col([html.Label('Plot Height (in)'),
+                             dbc.Input(id='plot-height', type='number', min=1, step=0.5,
+                                       value=DEFAULT_PARAMS['plot_height'])],
+                            className='parameter-col', width=3),
+                    dbc.Col([html.Label('Plot Min Lag'),
+                             dbc.Input(id='plot-min-lag', type='number', placeholder='Use analysis min lag')],
+                            className='parameter-col', width=3),
+                    dbc.Col([html.Label('Plot Max Lag'),
+                             dbc.Input(id='plot-max-lag', type='number', placeholder='Use analysis max lag')],
+                            className='parameter-col', width=3),
+                ], className='parameter-row'),
+                dbc.Row([
+                    dbc.Col([
+                        html.Label('Display Options'),
+                        dbc.Checklist(
+                            id='plot-options',
+                            options=[
+                                {'label': 'Colorbar', 'value': 'colorbar'},
+                                {'label': 'Time Series 2', 'value': 'ts2'},
+                            ],
+                            value=['colorbar', 'ts2'],
+                            switch=True,
+                            inline=True,
+                            className='parameter-switch'
+                        ),
+                    ], className='parameter-col', width=12),
+                ], className='parameter-row'),
+                html.Div(
+                    [
+                        dbc.Button('Update Plot', id='update-plot-button', color='secondary', outline=True,
+                                   className='update-plot-button', n_clicks=0, disabled=True),
+                        html.Div(id='plot-feedback', className='plot-feedback')
+                    ],
+                    className='plot-actions'
+                ),
+            ]),
+            id='plot-collapse',
+            is_open=False,
+        ),
+    ],
+    className='parameters-card collapsible-card'
 )
 
 file_upload = dbc.Card(
@@ -911,6 +930,21 @@ def toggle_preview_collapse(n_clicks, is_open):
 
 
 @app.callback(
+    Output('plot-collapse', 'is_open'),
+    Output('plot-card-icon', 'children'),
+    Input('toggle-plot-card', 'n_clicks'),
+    State('plot-collapse', 'is_open'),
+    prevent_initial_call=True,
+)
+def toggle_plot_collapse(n_clicks, is_open):
+    if not n_clicks:
+        raise PreventUpdate
+    new_state = not is_open
+    icon = '▴' if new_state else '▾'
+    return new_state, icon
+
+
+@app.callback(
     Output('sidebar-offcanvas', 'is_open'),
     Input('sidebar-toggle', 'n_clicks'),
     State('sidebar-offcanvas', 'is_open'),
@@ -973,9 +1007,9 @@ def set_run_button_label(data):
     State('max-lag', 'value'),
     State('window', 'value'),
     State('n-permutations', 'value'),
-    State('plot-title', 'value'),
     State('label-fontsize', 'value'),
     State('plot-dpi', 'value'),
+    State('plot-alpha', 'value'),
     State('plot-width', 'value'),
     State('plot-height', 'value'),
     State('plot-min-lag', 'value'),
@@ -985,7 +1019,7 @@ def set_run_button_label(data):
     prevent_initial_call=True,
 )
 def enqueue_sdc_job(n_clicks, ts1, ts2, date, method, min_lag, max_lag, window,
-                    n_permutations, plot_title, label_fontsize, plot_dpi,
+                    n_permutations, label_fontsize, plot_dpi, plot_alpha,
                     plot_width, plot_height, plot_min_lag, plot_max_lag,
                     plot_options, data):
     if not n_clicks:
@@ -1009,7 +1043,6 @@ def enqueue_sdc_job(n_clicks, ts1, ts2, date, method, min_lag, max_lag, window,
             'message': f"Please provide values for: {', '.join(missing)}."
         }
 
-    plot_title = plot_title.strip() if plot_title else None
     try:
         label_fontsize = int(label_fontsize) if label_fontsize is not None else 12
     except (TypeError, ValueError):
@@ -1018,6 +1051,19 @@ def enqueue_sdc_job(n_clicks, ts1, ts2, date, method, min_lag, max_lag, window,
         plot_dpi = int(plot_dpi) if plot_dpi is not None else 300
     except (TypeError, ValueError):
         plot_dpi = 300
+
+    def _coerce_alpha(value, default=DEFAULT_PARAMS['alpha']):
+        try:
+            if value in (None, ''):
+                return default
+            value = float(value)
+        except (TypeError, ValueError):
+            return default
+        if not 0 < value <= 1:
+            return default
+        return value
+
+    plot_alpha = _coerce_alpha(plot_alpha)
 
     try:
         n_permutations = int(n_permutations) if n_permutations not in (None, '') else DEFAULT_PARAMS['n_permutations']
@@ -1065,9 +1111,9 @@ def enqueue_sdc_job(n_clicks, ts1, ts2, date, method, min_lag, max_lag, window,
             max_lag,
             window,
             n_permutations,
-            plot_title,
             label_fontsize,
             plot_dpi,
+            plot_alpha,
             show_colorbar,
             show_ts2,
             plot_width,
@@ -1184,9 +1230,9 @@ def on_download_click(n_clicks, data):
     Output('plot-feedback', 'children'),
     Input('update-plot-button', 'n_clicks'),
     State('results-store', 'data'),
-    State('plot-title', 'value'),
     State('label-fontsize', 'value'),
     State('plot-dpi', 'value'),
+    State('plot-alpha', 'value'),
     State('plot-width', 'value'),
     State('plot-height', 'value'),
     State('plot-min-lag', 'value'),
@@ -1194,7 +1240,7 @@ def on_download_click(n_clicks, data):
     State('plot-options', 'value'),
     prevent_initial_call=True,
 )
-def on_update_plot(n_clicks, data, plot_title, label_fontsize, plot_dpi,
+def on_update_plot(n_clicks, data, label_fontsize, plot_dpi, plot_alpha,
                    plot_width, plot_height, plot_min_lag, plot_max_lag,
                    plot_options):
     if not n_clicks:
@@ -1243,12 +1289,23 @@ def on_update_plot(n_clicks, data, plot_title, label_fontsize, plot_dpi,
 
     plot_min_lag = _coerce_optional_int(plot_min_lag, plot_settings.get('min_lag'))
     plot_max_lag = _coerce_optional_int(plot_max_lag, plot_settings.get('max_lag'))
+    alpha_default = plot_settings.get('alpha', DEFAULT_PARAMS['alpha'])
 
-    plot_title_clean = plot_title.strip() if plot_title else None
+    def _coerce_alpha(value, default):
+        try:
+            if value in (None, ''):
+                return default
+            value = float(value)
+        except (TypeError, ValueError):
+            return default
+        if not 0 < value <= 1:
+            return default
+        return value
+
+    plot_alpha = _coerce_alpha(plot_alpha, alpha_default)
 
     new_image = tasks.render_sdc_plot_from_payload(
         data['analysis'],
-        plot_title=plot_title_clean,
         labels_fontsize=label_fontsize,
         show_colorbar=show_colorbar,
         show_ts2=show_ts2,
@@ -1256,6 +1313,7 @@ def on_update_plot(n_clicks, data, plot_title, label_fontsize, plot_dpi,
         figsize=(plot_width, plot_height),
         min_lag_override=plot_min_lag,
         max_lag_override=plot_max_lag,
+        alpha=plot_alpha,
     )
 
     feedback = html.Span('Plot updated with the latest styling options.', className='plot-feedback-text')

@@ -75,6 +75,10 @@ def _deserialize_analysis(payload: Dict[str, Any]) -> sdc.SDCAnalysis:
     min_lag = -np.inf if min_lag is None else float(min_lag)
     max_lag = np.inf if max_lag is None else float(max_lag)
 
+    n_permutations = payload.get("n_permutations")
+    if n_permutations is None:
+        n_permutations = 99
+
     return sdc.SDCAnalysis(
         ts1=ts1,
         ts2=ts2,
@@ -83,7 +87,7 @@ def _deserialize_analysis(payload: Dict[str, Any]) -> sdc.SDCAnalysis:
         min_lag=min_lag,
         max_lag=max_lag,
         sdc_df=sdc_df,
-        n_permutations=payload.get("n_permutations") or 100,
+        n_permutations=n_permutations,
         permutations=payload.get("permutations", False)
     )
 
@@ -211,7 +215,7 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
             (sdc_df
             .loc[lambda dd: (dd.lag <= max_lag) & (dd.lag >= min_lag)]
             .pipe(lambda dd: sns.heatmap(dd.pivot(index='date_2', columns='date_1', values='r'), cbar=False,
-                                        mask=dd.pivot(index='date_2', columns='date_1', values='p_value') >= .05,
+                                        mask=dd.pivot(index='date_2', columns='date_1', values='p_value') >= alpha,
                                         cmap='RdBu_r', ax=hm))
             )
 
@@ -219,7 +223,7 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
             (sdc_df
             .loc[lambda dd: (dd.lag <= max_lag) & (dd.lag >= min_lag)]
             .pipe(lambda dd: sns.heatmap(dd.pivot(index='date_2', columns='date_1', values='r'), cbar=False,
-                                        mask=dd.pivot(index='date_2', columns='date_1', values='p_value') >= .05,
+                                        mask=dd.pivot(index='date_2', columns='date_1', values='p_value') >= alpha,
                                         cmap='plasma', ax=hm))
             )
         # Add identity line to ease shift visualization
@@ -303,10 +307,6 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
             (self.sdc_df
             .loc[lambda dd: dd.p_value < alpha]
             .loc[lambda dd: (dd.lag <= max_lag) & (dd.lag >= min_lag)]
-            # We keep this uglyly commented here in case we want to revert to this method of calculating max correlations
-            # .groupby('date_1')
-            # .apply(lambda dd: dd.loc[dd['r'].abs() == dd['r'].abs().max()].loc[lambda d: d['lag'] == d['lag'].min()])
-            # .reset_index(drop=True)
             .groupby('date_1')
             .agg(r_max=('r', lambda x: x.where(x > 0).max()), r_min=('r', lambda x: abs(x.where(x < 0).min())))
             .rename(columns={'r_max': 'Max $r$', 'r_min': 'Min $r$ (abs)'})
@@ -314,7 +314,7 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
             .melt('date_1')
             .assign(date_1=lambda dd: dd.date_1 + pd.to_timedelta(left_offset * freq_mult, unit=freq_unit))
             .assign(color=lambda dd: dd.variable.apply(lambda x: colors[x]))
-            .plot.scatter(x='date_1', y='value', c='color', ax=mc1, style='-', alpha=1, colorbar=False, s=10)
+            .plot.scatter(x='date_1', y='value', c='color', ax=mc1, alpha=.7, colorbar=False, s=10)
             )
             plt.setp(mc1.get_xticklabels(), visible=False)
             mc1.set_xlabel('')
@@ -336,7 +336,7 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
             .melt('date_2')
             .assign(date_2=lambda dd: dd.date_2 + pd.to_timedelta(left_offset * freq_mult, unit=freq_unit))
             .assign(color=lambda dd: dd.variable.apply(lambda x: colors[x]))
-            .plot.scatter(x='value', y='date_2', c='color', ax=mc2, style='o', alpha=.7, colorbar=False)
+            .plot.scatter(x='value', y='date_2', c='color', ax=mc2, alpha=.7, colorbar=False, s=10)
             )
             plt.setp(mc2.get_yticklabels(), visible=False)
             mc2.set_xlabel('Max |corr|')
@@ -360,11 +360,11 @@ def _encode_plot(
     max_lag: float,
     *,
     labels_fontsize: int = 12,
-    plot_title: Optional[str] = None,
     show_colorbar: bool = True,
     show_ts2: bool = True,
     plot_dpi: int = 150,
     figsize: tuple[float, float] = (7, 7),
+    alpha: float = 0.05,
 ) -> str:
     buffer = io.BytesIO()
     fig = combi_plot(
@@ -374,13 +374,13 @@ def _encode_plot(
         wspace=.15,
         hspace=.15,
         date_fmt="%Y-%m",
-        alpha=0.05,
+        alpha=alpha,
         labels_fontsize=labels_fontsize,
         max_lag=max_lag,
         min_lag=min_lag,
         metric_label=metric_maps.get(analysis.method, analysis.method),
         figsize=figsize,
-        title=plot_title if plot_title else None,
+        title=None,
         show_colorbar=show_colorbar,
         show_ts2=show_ts2,
     )
@@ -392,7 +392,6 @@ def _encode_plot(
 def render_sdc_plot_from_payload(
     payload: Dict[str, Any],
     *,
-    plot_title: Optional[str] = None,
     labels_fontsize: int = 12,
     show_colorbar: bool = True,
     show_ts2: bool = True,
@@ -400,6 +399,7 @@ def render_sdc_plot_from_payload(
     figsize: tuple[float, float] = (7, 7),
     min_lag_override: Optional[int] = None,
     max_lag_override: Optional[int] = None,
+    alpha: float = 0.05,
 ) -> str:
     analysis = _deserialize_analysis(payload)
     min_lag = payload.get("min_lag")
@@ -423,11 +423,11 @@ def render_sdc_plot_from_payload(
         min_lag,
         max_lag,
         labels_fontsize=labels_fontsize,
-        plot_title=plot_title,
         show_colorbar=show_colorbar,
         show_ts2=show_ts2,
         plot_dpi=plot_dpi,
         figsize=figsize,
+        alpha=alpha,
     )
 
 
@@ -477,9 +477,9 @@ def run_sdc_analysis(
     max_lag: int,
     window: int,
     n_permutations: Optional[int] = None,
-    plot_title: Optional[str] = None,
     labels_fontsize: Optional[int] = None,
     plot_dpi: Optional[int] = None,
+    alpha: Optional[float] = None,
     show_colorbar: bool = True,
     show_ts2: bool = True,
     plot_width: Optional[float] = None,
@@ -501,18 +501,23 @@ def run_sdc_analysis(
         max_lag = np.inf if max_lag is None else int(max_lag)
         labels_fontsize = int(labels_fontsize) if labels_fontsize else 12
         plot_dpi = int(plot_dpi) if plot_dpi else 150
-        plot_title = plot_title.strip() if plot_title else None
         show_colorbar = bool(show_colorbar)
         show_ts2 = bool(show_ts2)
         try:
-            n_permutations = int(n_permutations) if n_permutations is not None else 100
+            n_permutations = int(n_permutations) if n_permutations is not None else 99
         except (TypeError, ValueError):
-            n_permutations = 100
-        if n_permutations <= 0:
-            permutations_enabled = False
-            n_permutations = 100
-        else:
-            permutations_enabled = True
+            n_permutations = 99
+        if n_permutations < 0:
+            n_permutations = 0
+        permutations_enabled = n_permutations > 0
+
+        try:
+            alpha = float(alpha) if alpha not in (None, '') else 0.05
+        except (TypeError, ValueError):
+            alpha = 0.05
+        if not 0 < alpha <= 1:
+            alpha = 0.05
+
         plot_width = float(plot_width) if plot_width else 7.0
         plot_height = float(plot_height) if plot_height else 7.0
         if plot_width <= 0:
@@ -551,11 +556,11 @@ def run_sdc_analysis(
             plot_min_lag,
             plot_max_lag,
             labels_fontsize=labels_fontsize,
-            plot_title=plot_title,
             show_colorbar=show_colorbar,
             show_ts2=show_ts2,
             plot_dpi=plot_dpi,
             figsize=(plot_width, plot_height),
+            alpha=alpha,
         )
         excel_bytes = _build_excel_payload(analysis)
 
@@ -572,7 +577,6 @@ def run_sdc_analysis(
         summary_min = None if not math.isfinite(min_lag) else min_lag
         summary_max = None if not math.isfinite(max_lag) else max_lag
         plot_settings = {
-            "title": plot_title or '',
             "label_fontsize": labels_fontsize,
             "dpi": plot_dpi,
             "show_colorbar": show_colorbar,
@@ -583,6 +587,7 @@ def run_sdc_analysis(
             "max_lag": None if not math.isfinite(plot_max_lag) else plot_max_lag,
             "n_permutations": n_permutations,
             "permutations": permutations_enabled,
+            "alpha": alpha,
         }
 
         return {
@@ -597,6 +602,7 @@ def run_sdc_analysis(
                 "max_lag": summary_max,
                 "n_permutations": n_permutations,
                 "permutations": permutations_enabled,
+                "alpha": alpha,
                 "plot": plot_settings,
             },
         }
