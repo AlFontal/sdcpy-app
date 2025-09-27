@@ -1,9 +1,12 @@
 import io
 import os
+import base64
+from pathlib import Path
+from datetime import datetime, timezone
+
 import dash
 import tasks
 import redis
-import base64
 
 import pandas as pd
 import dash_ag_grid as dag
@@ -74,6 +77,8 @@ DEFAULT_PARAMS = {
     'plot_height': 7.0,
     'alpha': 0.05,
 }
+
+EXAMPLE_DATASET_PATH = Path('data') / 'oni_temp_sa.csv'
 
 sidebar_content = html.Div(
     [
@@ -225,11 +230,9 @@ def sanitize_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             samples = non_null.head(5)
             if not samples.empty:
                 info['sample_values'] = [str(val) for val in samples]
-                parsed_samples = [val.strftime('%Y-%m-%d') if hasattr(val, 'strftime') else str(val) for val in samples]
                 info['parsed_examples'] = parsed_samples
                 info['sample_value'] = info['sample_values'][0]
                 info['parsed_example'] = info['parsed_examples'][0]
-            info['suggested_format'] = '%Y-%m-%d'
             report['date_columns'].append(info)
             continue
 
@@ -252,7 +255,6 @@ def sanitize_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             parsed_example = parsed_non_null.iloc[0] if not parsed_non_null.empty else None
             info['sample_value'] = str(sample_original) if sample_original is not None else None
             if parsed_example is not None:
-                info['parsed_example'] = parsed_example.strftime('%Y-%m-%d')
                 info['suggested_format'] = _infer_datetime_format(info['sample_value']) or ''
 
             if not parsed_non_null.empty:
@@ -273,6 +275,7 @@ def sanitize_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 
             report['date_columns'].append(info)
 
+    report['generated_at'] = datetime.now(timezone.utc).isoformat()
     return df, report
 
 
@@ -320,6 +323,52 @@ def build_sanitization_alert(report: dict):
 
     return dbc.Alert(alert_body, color='info', className='mt-3', dismissable=True)
 
+def prepare_dataset_payload(original_df: pd.DataFrame,
+                            sanitized_df: pd.DataFrame,
+                            filename: str,
+                            report: dict):
+    report = report or {}
+    report.setdefault('filename', filename)
+    grid_df = sanitized_df.copy()
+    for col in grid_df.columns:
+        if pd.api.types.is_datetime64_any_dtype(grid_df[col]):
+            grid_df[col] = pd.to_datetime(grid_df[col]).dt.tz_localize(None).dt.strftime('%Y-%m-%d %H:%M:%S')
+    row_data = grid_df.fillna('').to_dict('records')
+    column_defs = build_column_defs(sanitized_df)
+    sanitized_serialized_df = sanitized_df.copy()
+    for col in sanitized_serialized_df.columns:
+        if pd.api.types.is_datetime64_any_dtype(sanitized_serialized_df[col]):
+            sanitized_serialized_df[col] = sanitized_serialized_df[col].dt.tz_localize(None).dt.strftime('%Y-%m-%d %H:%M:%S')
+    sanitized_serialized_df = sanitized_serialized_df.where(sanitized_serialized_df.notna(), '')
+    sanitized_serialized = sanitized_serialized_df.to_dict('list')
+    original_serialized_df = original_df.copy()
+    for col in original_serialized_df.columns:
+        if pd.api.types.is_datetime64_any_dtype(original_serialized_df[col]):
+            original_serialized_df[col] = pd.to_datetime(original_serialized_df[col]).dt.tz_localize(None).dt.strftime('%Y-%m-%d %H:%M:%S')
+    original_serialized_df = original_serialized_df.where(original_serialized_df.notna(), None)
+    original_serialized = original_serialized_df.to_dict('list')
+    sanitization_alert = build_sanitization_alert(report)
+    preview_title = f'Dataset Preview – {len(sanitized_df):,} rows × {len(sanitized_df.columns):,} columns (first 10 shown)'
+    return (
+        original_serialized,
+        sanitized_serialized,
+        row_data,
+        column_defs,
+        html.P(filename, className='upload-filename'),
+        False,  # parameters card visible
+        False,  # plot card visible
+        False,  # run button container visible
+        True,   # divider hidden until run starts
+        True,   # progress container hidden
+        True,   # results container hidden
+        False,  # run button enabled
+        True,   # update plot button disabled until results exist
+        None,   # clear feedback message
+        f'Uploaded dataset: {filename}',
+        preview_title,
+        sanitization_alert,
+        report,
+    )
 
 def build_date_review_body(report: dict | None,
                            overrides: dict[str, str] | None = None,
@@ -574,6 +623,9 @@ file_upload = dbc.Card(
                     children=html.Div('Upload dataset (.csv)', className='upload-box'),
                     className='upload-container'
                 ),
+                dbc.Button('Load example dataset: ONI anomalies vs T anomalies in South America 1998-2024',
+                            id='load-example-button', color='secondary', outline=True,
+                            className='mt-3'),
                 html.Div(id='output-data-upload')
             ]),
             id='upload-collapse',
@@ -698,74 +750,73 @@ def parse_contents(contents, filename):
                Output('preview-card-title', 'children'),
                Output('output-data-upload', 'children'),
                Output('date-report-store', 'data')],
-             Input('upload-data', 'contents'),
-             State('upload-data', 'filename'),
-             prevent_initial_call=True)
-def update_output(content, filename):
-    if content is None:
+                         Input('upload-data', 'contents'),
+              Input('load-example-button', 'n_clicks'),
+              State('upload-data', 'filename'),
+              prevent_initial_call=True)
+def update_output(content, example_clicks, filename):
+    ctx = dash.callback_context
+    if not ctx.triggered:
         raise PreventUpdate
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
 
-    sanitized_df, error, report, original_df = parse_contents(content, filename)
-    if error is not None:
-        return (
-            no_update,  # raw data
-            no_update,  # memory data
-            no_update,  # grid rows
-            no_update,  # grid columns
-            no_update,  # upload preview text
-            True,       # parameters card hidden
-            True,       # plot card hidden
-            True,       # run button container hidden
-            True,       # divider hidden
-            True,       # progress container hidden
-            True,       # results container hidden
-            True,       # run button disabled
-            True,       # update plot disabled
-            None,       # plot feedback cleared
-            'Upload Dataset',
-            'Dataset Preview',
-            error,
-            None,      # reset date report
-        )
-
-    grid_df = sanitized_df.copy()
-    for col in grid_df.columns:
-        if pd.api.types.is_datetime64_any_dtype(grid_df[col]):
-            grid_df[col] = pd.to_datetime(grid_df[col]).dt.tz_localize(None).dt.strftime('%Y-%m-%d %H:%M:%S')
-
-    row_data = grid_df.fillna('').to_dict('records')
-    column_defs = build_column_defs(sanitized_df)
-
-    serialized_df = sanitized_df.copy()
-    for col in serialized_df.columns:
-        if pd.api.types.is_datetime64_any_dtype(serialized_df[col]):
-            serialized_df[col] = serialized_df[col].dt.tz_localize(None).dt.strftime('%Y-%m-%d %H:%M:%S')
-    serialized_df = serialized_df.where(serialized_df.notna(), '')
-    serialized = serialized_df.to_dict('list')
-
-    original_serialized = original_df.where(original_df.notna(), None).to_dict('list')
-
-    sanitization_alert = build_sanitization_alert(report)
-
-    return (original_serialized,
-            serialized,
-            row_data,
-            column_defs,
-            html.P(filename, className='upload-filename'),
-            False,  # parameters card visible
-            False,  # plot card visible
-            False,  # run button container visible
-            True,   # divider hidden until run starts
-            True,   # progress container hidden
-            True,   # results container hidden
-            False,  # run button enabled
-            True,   # update plot button disabled until results exist
-            None,   # clear feedback message
-            f'Uploaded dataset: {filename}',
-            f'Dataset Preview – {len(sanitized_df):,} rows × {len(sanitized_df.columns):,} columns',
-            sanitization_alert,
-            report,
+    if trigger == 'load-example-button':
+        if not example_clicks:
+            raise PreventUpdate
+        if not EXAMPLE_DATASET_PATH.exists():
+            error_alert = dbc.Alert('Example dataset could not be loaded. Please upload your own CSV file.',
+                                    color='danger')
+            return (
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                None,
+                'Upload Dataset',
+                'Dataset Preview',
+                error_alert,
+                None,
             )
+        original_df = pd.read_csv(EXAMPLE_DATASET_PATH)
+        sanitized_df, report = sanitize_dataframe(original_df.copy())
+        return prepare_dataset_payload(original_df, sanitized_df, EXAMPLE_DATASET_PATH.name, report)
+    if trigger == 'upload-data':
+        if content is None:
+            raise PreventUpdate
+        sanitized_df, error, report, original_df = parse_contents(content, filename or 'uploaded.csv')
+        if error is not None:
+            return (
+                no_update,  # raw data
+                no_update,  # memory data
+                no_update,  # grid rows
+                no_update,  # grid columns
+                no_update,  # upload preview text
+                True,       # parameters card hidden
+                True,       # plot card hidden
+                True,       # run button container hidden
+                True,       # divider hidden
+                True,       # progress container hidden
+                True,       # results container hidden
+                True,       # run button disabled
+                True,       # update plot disabled
+                None,       # plot feedback cleared
+                'Upload Dataset',
+                'Dataset Preview',
+                error,
+                None,      # reset date report
+            )
+        return prepare_dataset_payload(original_df, sanitized_df, filename or 'uploaded.csv', report)
+    raise PreventUpdate
+
 
 
 @app.callback([Output('ts1-dropdown', 'options'),
