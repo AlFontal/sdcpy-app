@@ -365,8 +365,9 @@ def _encode_plot(
     plot_dpi: int = 150,
     figsize: tuple[float, float] = (7, 7),
     alpha: float = 0.05,
-) -> str:
-    buffer = io.BytesIO()
+) -> tuple[str, str]:
+    png_buffer = io.BytesIO()
+    svg_buffer = io.StringIO()
     fig = combi_plot(
         analysis,
         xlabel=ts1,
@@ -384,9 +385,10 @@ def _encode_plot(
         show_colorbar=show_colorbar,
         show_ts2=show_ts2,
     )
-    fig.savefig(buffer, format="png", dpi=plot_dpi, bbox_inches="tight")
+    fig.savefig(png_buffer, format="png", dpi=plot_dpi, bbox_inches="tight")
+    fig.savefig(svg_buffer, format="svg", bbox_inches="tight")
     plt.close(fig)
-    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return base64.b64encode(png_buffer.getvalue()).decode("utf-8"), svg_buffer.getvalue()
 
 
 def render_sdc_plot_from_payload(
@@ -400,7 +402,7 @@ def render_sdc_plot_from_payload(
     min_lag_override: Optional[int] = None,
     max_lag_override: Optional[int] = None,
     alpha: float = 0.05,
-) -> str:
+) -> tuple[str, str]:
     analysis = _deserialize_analysis(payload)
     min_lag = payload.get("min_lag")
     max_lag = payload.get("max_lag")
@@ -549,7 +551,7 @@ def run_sdc_analysis(
         )
 
         analysis_payload = _serialize_analysis(analysis, ts1, ts2, min_lag, max_lag)
-        plot_b64 = _encode_plot(
+        plot_png, plot_svg = _encode_plot(
             analysis,
             ts1,
             ts2,
@@ -591,7 +593,8 @@ def run_sdc_analysis(
         }
 
         return {
-            "image": plot_b64,
+            "image": plot_png,
+            "image_svg": plot_svg,
             "excel": base64.b64encode(excel_bytes).decode("utf-8"),
             "analysis": analysis_payload,
             "plot_settings": plot_settings,

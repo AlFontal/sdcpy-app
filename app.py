@@ -1239,13 +1239,19 @@ def manage_job(job_data, _):
             id='sdc-results-img',
             style={'cursor': 'zoom-in'}
         )
-        download_button = dbc.Button('Download Results Table', id='download-button', color='secondary')
+        download_button = dbc.Button('Download', id='download-button', color='secondary')
+        xlsx_button = dbc.Button('XLSX', id='download-results-xlsx-button', color='secondary', outline=True)
+        png_button = dbc.Button('PNG', id='download-plot-png-button', color='secondary', outline=True)
+        svg_button = dbc.Button('SVG', id='download-plot-svg-button', color='secondary', outline=True)
+
 
         results_children = [
             dbc.Row([dbc.Col(dcc.Markdown('### SDC Analysis Results')),
             dbc.Col(html.Div([
-                download_button,
-                dcc.Download(id='download-results-xlsx')
+                dbc.ButtonGroup([download_button, xlsx_button, png_button, svg_button]),
+                dcc.Download(id='download-results-xlsx'),
+                dcc.Download(id='download-plot-png'),
+                dcc.Download(id='download-plot-svg')
             ], className='results-actions'))], justify='between'),
             html.Small('Click the plot to open a large preview.', className='plot-hint'),
             image_div,
@@ -1258,9 +1264,10 @@ def manage_job(job_data, _):
 
     running_progress = build_progress_content(progress)
     return running_progress, False, False, no_update, no_update, True, dash.no_update, True, False, False, True
+
 @app.callback(
     Output("download-results-xlsx", "data"),
-    Input("download-button", "n_clicks"),
+    Input("download-results-xlsx-button", "n_clicks"),
     Input("results-store", "data"),
     prevent_initial_call=True,
 )
@@ -1275,10 +1282,39 @@ def on_download_click(n_clicks, data):
 
     raise PreventUpdate
 
+@app.callback(
+    Output('download-plot-png', 'data'),
+    Input('download-plot-png-button', 'n_clicks'),
+    State('results-store', 'data'),
+    prevent_initial_call=True,
+)
+def on_download_png(n_clicks, data):
+    if n_clicks and data and data.get('image'):
+        png_content = base64.b64decode(data['image'])
+        def _write_bytes(buffer):
+            buffer.write(png_content)
+        return dcc.send_bytes(_write_bytes, 'sdc_analysis.png')
+    raise PreventUpdate
+
+@app.callback(
+    Output('download-plot-svg', 'data'),
+    Input('download-plot-svg-button', 'n_clicks'),
+    State('results-store', 'data'),
+    prevent_initial_call=True,
+)
+def on_download_svg(n_clicks, data):
+    if n_clicks and data and data.get('image_svg'):
+        svg_content = data['image_svg']
+        def _write_text(buffer):
+            buffer.write(svg_content)
+        return dcc.send_string(_write_text, 'sdc_analysis.svg', type='image/svg+xml')
+    raise PreventUpdate
+
 
 @app.callback(
     Output('sdc-results-img', 'src'),
     Output('plot-feedback', 'children'),
+    Output('results-store', 'data', allow_duplicate=True),
     Input('update-plot-button', 'n_clicks'),
     State('results-store', 'data'),
     State('label-fontsize', 'value'),
@@ -1298,7 +1334,7 @@ def on_update_plot(n_clicks, data, label_fontsize, plot_dpi, plot_alpha,
         raise PreventUpdate
 
     if not data or 'analysis' not in data:
-        return no_update, no_update
+        return no_update, no_update, no_update
 
     plot_options = plot_options or []
     show_colorbar = 'colorbar' in plot_options
@@ -1355,7 +1391,7 @@ def on_update_plot(n_clicks, data, label_fontsize, plot_dpi, plot_alpha,
 
     plot_alpha = _coerce_alpha(plot_alpha, alpha_default)
 
-    new_image = tasks.render_sdc_plot_from_payload(
+    png_b64, svg_data = tasks.render_sdc_plot_from_payload(
         data['analysis'],
         labels_fontsize=label_fontsize,
         show_colorbar=show_colorbar,
@@ -1368,8 +1404,34 @@ def on_update_plot(n_clicks, data, label_fontsize, plot_dpi, plot_alpha,
     )
 
     feedback = html.Span('Plot updated with the latest styling options.', className='plot-feedback-text')
-
-    return f"data:image/png;base64,{new_image}", feedback
+    updated_results = data.copy() if isinstance(data, dict) else {}
+    if updated_results:
+        updated_results = {**updated_results}
+        updated_results['image'] = png_b64
+        updated_results['image_svg'] = svg_data
+        plot_settings = {**(updated_results.get('plot_settings') or {})}
+        plot_settings.update({
+            'label_fontsize': label_fontsize,
+            'dpi': plot_dpi,
+            'show_colorbar': show_colorbar,
+            'show_ts2': show_ts2,
+            'width': plot_width,
+            'height': plot_height,
+            'min_lag': plot_min_lag,
+            'max_lag': plot_max_lag,
+            'n_permutations': plot_settings.get('n_permutations'),
+            'permutations': plot_settings.get('permutations'),
+            'alpha': plot_alpha,
+        })
+        updated_results['plot_settings'] = plot_settings
+        if 'summary' in updated_results and isinstance(updated_results['summary'], dict):
+            updated_summary = {**updated_results['summary']}
+            updated_summary['plot'] = plot_settings
+            updated_summary['alpha'] = plot_alpha
+            updated_results['summary'] = updated_summary
+    else:
+        updated_results = data
+    return f"data:image/png;base64,{png_b64}", feedback, updated_results
 
 
 @app.callback(
