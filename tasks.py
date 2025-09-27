@@ -133,46 +133,96 @@ def _build_analysis_dataframe(data: Dict[str, Any], date_column: str) -> pd.Data
     return df.assign(date=lambda dd: pd.to_datetime(dd[date_column])).set_index("date")
 
 
+def _determine_frequency_info(index):
+    """
+    Determine frequency information for time series index.
+    Returns (freq_str, freq_mult, freq_unit) tuple.
+    
+    Parameters:
+    -----------
+    index : pandas.Index
+        The index of the time series
+        
+    Returns:
+    --------
+    tuple: (freq_str, freq_mult, freq_unit)
+        freq_str: Human-readable frequency description
+        freq_mult: Numeric multiplier for the frequency
+        freq_unit: Pandas time unit ('D', 'W', etc.) or None
+    """
+    # Check if index is datetime-like
+    is_datetime_index = pd.api.types.is_datetime64_any_dtype(index)
+    
+    if not is_datetime_index:
+        # Non-datetime index - use integer positioning
+        return 'periods', 1, "D"
+    
+
+    frequency = pd.infer_freq(index)
+    if frequency:
+        # Handle daily frequencies (1D, 2D, 3D, etc.)
+        if re.match(r'^[0-9]*D$', frequency):
+            freq_mult = 1
+            match = re.match(r'^([0-9]+)D$', frequency)
+            if match:
+                freq_mult = int(match.group(1))
+            
+            freq_str = 'days' if freq_mult == 1 else f'{freq_mult}-day periods'
+            return freq_str, freq_mult, 'D'
+        
+        # Handle weekly frequencies (1W, 2W, etc.)
+        elif re.match(r'^[0-9]*W', frequency):
+            freq_mult = 1
+            match = re.match(r'^([0-9]+)W', frequency)
+            if match:
+                freq_mult = int(match.group(1))
+            
+            freq_str = 'weeks' if freq_mult == 1 else f'{freq_mult}-week periods'
+            return freq_str, freq_mult, 'W'
+        
+        # Handle monthly frequencies
+        elif frequency.startswith('M') or frequency.startswith('MS'):
+            freq_mult = 1
+            match = re.match(r'^([0-9]+)', frequency)
+            if match:
+                freq_mult = int(match.group(1))
+            
+            freq_str = 'months' if freq_mult == 1 else f'{freq_mult}-month periods'
+            return freq_str, freq_mult * 30.44, 'D'  # Use days for months
+        
+        # Handle yearly frequencies
+        elif frequency.startswith('Y') or frequency.startswith('A'):
+            freq_mult = 1
+            match = re.match(r'^([0-9]+)', frequency)
+            if match:
+                freq_mult = int(match.group(1))
+            
+            freq_str = 'years' if freq_mult == 1 else f'{freq_mult}-year periods'
+            return freq_str, freq_mult * 365.25, 'D'  # Use days for years
+    else:
+        # Frequency is not inferred (likely irregular)
+        freq_str = 'periods'
+        freq_mult = index.to_series().diff().median().days
+        freq_unit = 'D'
+        return freq_str, freq_mult, freq_unit
+
+    
+    # For datetime index with irregular frequency, fall back to integer indexing
+    warnings.warn('Could not infer regular frequency from datetime index. Using integer positioning for correlations.')
+    return 'time periods', False, 1, None
+
 def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', title: str = None, max_r: float = None,
                    date_fmt: str = '%m-%d', align: str = 'center', max_lag: int = np.inf, min_lag: int = -np.inf,
                    labels_fontsize: int = 12, wspace: float = 1., hspace: float = 1., show_colorbar: bool = True,
                    metric_label: str = None, show_ts2: bool = True,
                    **kwargs):
-        # Setting up parameters
-        frequency = pd.infer_freq(self.ts1.index)
-        if frequency:
-            if re.match(r'^[0-9]*D', frequency):
-                freq_str = 'days'
-                freq_unit = 'D'
-                if re.match(r'^[0-9]+D', frequency):
-                    freq_mult = int(re.match(r'^([0-9]+)D', frequency).groups()[0])
-                else:
-                    freq_mult = 1
-            # capture first alphabetic (non-numeric) letter and check if it's W
-            elif re.match(r'^[0-9]*W', frequency):
-                freq_str = 'weeks'
-                freq_unit = 'W'
-                if re.match(r'^[0-9]+W', frequency):
-                    freq_mult = int(re.match(r'^([0-9]+)W', frequency).groups()[0])
-                else:
-                    freq_mult = 1
-            elif frequency[0] == 'M':
-                freq_str = 'months'
-                freq_unit = 'W'
-                if re.match(r'^[0-9]+M', frequency):
-                    freq_mult = int(re.match(r'^([0-9]+)M', frequency).groups()[0]) * 4.33
-                else:
-                    freq_mult = 4.33
-            else: 
-                freq_str = ''
-        else:
-            raise warnings.warn('Could not infer frequency of the time-series. Axis labels may be incorrect.')
-            freq_str = ''
-        
+            
         title = f'' if title is None else title
         align = align.lower()
         metric_label = metric_label if metric_label is not None else self.method
-
+        # Get frequency information
+        freq_str, freq_mult, freq_unit = _determine_frequency_info(self.ts1.index)
+        
         if align not in ['left', 'center', 'right']:
             warnings.warn(f'Alignment method "{align}" not recognized, defaulting to center alignment.')
             align = 'center'
@@ -183,8 +233,9 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
         date_format = mdates.DateFormatter(date_fmt)
         sdc_df = self.sdc_df.copy()
         fig = plt.figure(**kwargs)
-        # We are organizing the grid in a 5 x 5 matrix so that (TT=Title, HM: Heatmap, TS1/TS2: Time-Series 1/2,
-        # MC: Max Correlations):
+
+        # We are organizing the grid in a 5 x 5 matrix so that (TT=Title, HM: Heatmap, 
+        # TS1/TS2: Time-Series 1/2, MC: Max Correlations):
         # TT TT TT TT TT
         # NA TS1 TS1 NA NA
         # TS2 HM HM MC2 CB
@@ -304,18 +355,30 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
         colors = {'Max $r$': '#A81529', 'Min $r$ (abs)': '#144E8A'}
         if min_lag < 0:
             mc1 = fig.add_subplot(gs[-1, 1:3])
+            # Handle date adjustment based on index type
+            timedelta_offset = pd.to_timedelta(left_offset * freq_mult, unit=freq_unit)
+            date_adjustment = lambda dd: dd.date_1 + timedelta_offset
+            
             (self.sdc_df
-            .loc[lambda dd: dd.p_value < alpha]
-            .loc[lambda dd: (dd.lag <= max_lag) & (dd.lag >= min_lag)]
+            .query('p_value < @alpha')
+            .query('(lag <= @max_lag) & (lag >= @min_lag)')
             .groupby('date_1')
             .agg(r_max=('r', lambda x: x.where(x > 0).max()), r_min=('r', lambda x: abs(x.where(x < 0).min())))
             .rename(columns={'r_max': 'Max $r$', 'r_min': 'Min $r$ (abs)'})
             .reset_index()
             .melt('date_1')
-            .assign(date_1=lambda dd: dd.date_1 + pd.to_timedelta(left_offset * freq_mult, unit=freq_unit))
+            .assign(date_1=date_adjustment)
             .assign(color=lambda dd: dd.variable.apply(lambda x: colors[x]))
-            .plot.scatter(x='date_1', y='value', c='color', ax=mc1, alpha=.7, colorbar=False, s=10)
-            )
+            .plot
+            .scatter(
+                x='date_1', 
+                y='value', 
+                c='color', 
+                ax=mc1, 
+                alpha=.7, 
+                colorbar=False, 
+                linewidths=0,
+            ))
             plt.setp(mc1.get_xticklabels(), visible=False)
             mc1.set_xlabel('')
             mc1.set_ylabel('Max |corr|')
@@ -326,17 +389,32 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
             mc1.set_yticks([0, .5, 1])
         if max_lag > 0:
             mc2 = fig.add_subplot(gs[2:4, 3])
+
+            # Handle date adjustment based on index type
+  
+            timedelta_offset = pd.to_timedelta(left_offset * freq_mult, unit=freq_unit)
+            date_adjustment = lambda dd: dd.date_2 + timedelta_offset
+
             (self.sdc_df
             .loc[lambda dd: dd.p_value < alpha]
             .loc[lambda dd: (dd.lag <= max_lag) & (dd.lag >= min_lag)]
             .groupby('date_2')
-            .agg(r_max=('r', lambda x: x.where(x > 0).max()), r_min=('r', lambda x: abs(x.where(x < 0).min())))
+            .agg(r_max=('r', lambda x: x.where(x > 0).max()), 
+                 r_min=('r', lambda x: abs(x.where(x < 0).min())))
             .rename(columns={'r_max': 'Max $r$', 'r_min': 'Min $r$ (abs)'})
             .reset_index()
             .melt('date_2')
-            .assign(date_2=lambda dd: dd.date_2 + pd.to_timedelta(left_offset * freq_mult, unit=freq_unit))
+            .assign(date_2=date_adjustment)
             .assign(color=lambda dd: dd.variable.apply(lambda x: colors[x]))
-            .plot.scatter(x='value', y='date_2', c='color', ax=mc2, alpha=.7, colorbar=False, s=10)
+            .plot
+            .scatter(
+                x='value', 
+                y='date_2', 
+                c='color', 
+                ax=mc2, 
+                alpha=.7, 
+                colorbar=False, 
+                linewidths=0,)
             )
             plt.setp(mc2.get_yticklabels(), visible=False)
             mc2.set_xlabel('Max |corr|')
