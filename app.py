@@ -155,11 +155,9 @@ def build_column_defs(df: pd.DataFrame):
         }
         series = df[col]
 
-        if pd.api.types.is_numeric_dtype(series):
-            col_def.update({
-                'cellClass': 'ag-right-aligned-cell',
-            })
-        elif pd.api.types.is_datetime64_any_dtype(series):
+        col_def.update({'cellClass': 'ag-center-aligned-cell'})
+
+        if pd.api.types.is_datetime64_any_dtype(series):
             col_def.setdefault('valueFormatter', {
                 'function': "function(params){return params.value ? new Date(params.value).toLocaleString() : '';}"
             })

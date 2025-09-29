@@ -27,7 +27,7 @@ body.dark-mode {
   --label-color: #f5f7ff;
   --subtitle-color: #b5c1dd;
   --hint-color: #93a5c6;
-  --grid-header-bg: #22314e;
+  --grid-header-bg: #1f2b3f;
   --hint-color: #93a5c6;
   --border-color: rgba(231, 239, 255, 0.12);
   --input-bg: #1f2b3f;
@@ -73,6 +73,28 @@ body.dark-mode {
   background: linear-gradient(90deg, #4f46e5, #06b6d4);
   border-radius: 999px;
   margin-bottom: 1.5rem;
+}
+
+.modal-title {
+  color: var(--text-color);
+}
+
+.modal-content {
+  background-color: var(--card-bg);
+  color: var(--text-color);
+}
+
+.modal-body {
+  color: var(--text-color);
+}
+
+.text-muted {
+  color: var(--hint-color) !important;
+}
+
+.btn-close {
+  color: var(--text-color);
+  opacity: 0.7;
 }
 
 .section-divider {
@@ -390,7 +412,7 @@ is-open > .Select-control {
   --ag-foreground-color: var(--text-color, #1f2937);
   --ag-odd-row-background-color: var(--card-bg, #ffffff);
   --ag-secondary-foreground-color: var(--hint-color, #4b5563);
-  --ag-border-color: rgba(15, 23, 42, 0.08);
+  --ag-border-color: rgba(215, 219, 226, 0.08);
   --ag-header-background-color: var(--grid-header-bg, #eef2ff);
   --ag-row-hover-color: rgba(79, 70, 229, 0.08);
   --ag-selected-row-background-color: rgba(79, 70, 229, 0.12);
@@ -407,8 +429,15 @@ is-open > .Select-control {
   font-size: 0.95rem;
 }
 
-.ag-right-aligned-cell {
-  text-align: right;
+.ag-center-aligned-cell {
+  text-align: center;
+}
+
+.ag-header-cell-label {
+  font-weight: 1200;
+  color: var(--text-color);
+  letter-spacing: 0.03em;
+  justify-content: center;
 }
 
 #progress-div .progress {
