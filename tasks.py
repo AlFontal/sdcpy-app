@@ -53,6 +53,7 @@ def _serialize_analysis(analysis: sdc.SDCAnalysis, ts1_label: str, ts2_label: st
         "min_lag": min_lag_serial,
         "max_lag": max_lag_serial,
         "n_permutations": getattr(analysis, "n_permutations", None),
+        "permutations": bool(getattr(analysis, "permutations", False)),
         "ts1": _serialize_series(analysis.ts1),
         "ts2": _serialize_series(analysis.ts2),
         "ts1_label": ts1_label,
@@ -74,6 +75,10 @@ def _deserialize_analysis(payload: Dict[str, Any]) -> sdc.SDCAnalysis:
     min_lag = -np.inf if min_lag is None else float(min_lag)
     max_lag = np.inf if max_lag is None else float(max_lag)
 
+    n_permutations = payload.get("n_permutations")
+    if n_permutations is None:
+        n_permutations = 99
+
     return sdc.SDCAnalysis(
         ts1=ts1,
         ts2=ts2,
@@ -82,7 +87,8 @@ def _deserialize_analysis(payload: Dict[str, Any]) -> sdc.SDCAnalysis:
         min_lag=min_lag,
         max_lag=max_lag,
         sdc_df=sdc_df,
-        n_permutations=payload.get("n_permutations") or 99,
+        n_permutations=n_permutations,
+        permutations=payload.get("permutations", False)
     )
 
 
@@ -127,46 +133,96 @@ def _build_analysis_dataframe(data: Dict[str, Any], date_column: str) -> pd.Data
     return df.assign(date=lambda dd: pd.to_datetime(dd[date_column])).set_index("date")
 
 
+def _determine_frequency_info(index):
+    """
+    Determine frequency information for time series index.
+    Returns (freq_str, freq_mult, freq_unit) tuple.
+    
+    Parameters:
+    -----------
+    index : pandas.Index
+        The index of the time series
+        
+    Returns:
+    --------
+    tuple: (freq_str, freq_mult, freq_unit)
+        freq_str: Human-readable frequency description
+        freq_mult: Numeric multiplier for the frequency
+        freq_unit: Pandas time unit ('D', 'W', etc.) or None
+    """
+    # Check if index is datetime-like
+    is_datetime_index = pd.api.types.is_datetime64_any_dtype(index)
+    
+    if not is_datetime_index:
+        # Non-datetime index - use integer positioning
+        return 'periods', 1, "D"
+    
+
+    frequency = pd.infer_freq(index)
+    if frequency:
+        # Handle daily frequencies (1D, 2D, 3D, etc.)
+        if re.match(r'^[0-9]*D$', frequency):
+            freq_mult = 1
+            match = re.match(r'^([0-9]+)D$', frequency)
+            if match:
+                freq_mult = int(match.group(1))
+            
+            freq_str = 'days' if freq_mult == 1 else f'{freq_mult}-day periods'
+            return freq_str, freq_mult, 'D'
+        
+        # Handle weekly frequencies (1W, 2W, etc.)
+        elif re.match(r'^[0-9]*W', frequency):
+            freq_mult = 1
+            match = re.match(r'^([0-9]+)W', frequency)
+            if match:
+                freq_mult = int(match.group(1))
+            
+            freq_str = 'weeks' if freq_mult == 1 else f'{freq_mult}-week periods'
+            return freq_str, freq_mult, 'W'
+        
+        # Handle monthly frequencies
+        elif frequency.startswith('M') or frequency.startswith('MS'):
+            freq_mult = 1
+            match = re.match(r'^([0-9]+)', frequency)
+            if match:
+                freq_mult = int(match.group(1))
+            
+            freq_str = 'months' if freq_mult == 1 else f'{freq_mult}-month periods'
+            return freq_str, freq_mult * 30.44, 'D'  # Use days for months
+        
+        # Handle yearly frequencies
+        elif frequency.startswith('Y') or frequency.startswith('A'):
+            freq_mult = 1
+            match = re.match(r'^([0-9]+)', frequency)
+            if match:
+                freq_mult = int(match.group(1))
+            
+            freq_str = 'years' if freq_mult == 1 else f'{freq_mult}-year periods'
+            return freq_str, freq_mult * 365.25, 'D'  # Use days for years
+    else:
+        # Frequency is not inferred (likely irregular)
+        freq_str = 'periods'
+        freq_mult = index.to_series().diff().median().days
+        freq_unit = 'D'
+        return freq_str, freq_mult, freq_unit
+
+    
+    # For datetime index with irregular frequency, fall back to integer indexing
+    warnings.warn('Could not infer regular frequency from datetime index. Using integer positioning for correlations.')
+    return 'time periods', False, 1, None
+
 def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', title: str = None, max_r: float = None,
                    date_fmt: str = '%m-%d', align: str = 'center', max_lag: int = np.inf, min_lag: int = -np.inf,
                    labels_fontsize: int = 12, wspace: float = 1., hspace: float = 1., show_colorbar: bool = True,
                    metric_label: str = None, show_ts2: bool = True,
                    **kwargs):
-        # Setting up parameters
-        frequency = pd.infer_freq(self.ts1.index)
-        if frequency:
-            if re.match(r'^[0-9]*D', frequency):
-                freq_str = 'days'
-                freq_unit = 'D'
-                if re.match(r'^[0-9]+D', frequency):
-                    freq_mult = int(re.match(r'^([0-9]+)D', frequency).groups()[0])
-                else:
-                    freq_mult = 1
-            # capture first alphabetic (non-numeric) letter and check if it's W
-            elif re.match(r'^[0-9]*W', frequency):
-                freq_str = 'weeks'
-                freq_unit = 'W'
-                if re.match(r'^[0-9]+W', frequency):
-                    freq_mult = int(re.match(r'^([0-9]+)W', frequency).groups()[0])
-                else:
-                    freq_mult = 1
-            elif frequency[0] == 'M':
-                freq_str = 'months'
-                freq_unit = 'W'
-                if re.match(r'^[0-9]+M', frequency):
-                    freq_mult = int(re.match(r'^([0-9]+)M', frequency).groups()[0]) * 4.33
-                else:
-                    freq_mult = 4.33
-            else: 
-                freq_str = ''
-        else:
-            raise warnings.warn('Could not infer frequency of the time-series. Axis labels may be incorrect.')
-            freq_str = ''
-        
+            
         title = f'' if title is None else title
         align = align.lower()
         metric_label = metric_label if metric_label is not None else self.method
-
+        # Get frequency information
+        freq_str, freq_mult, freq_unit = _determine_frequency_info(self.ts1.index)
+        
         if align not in ['left', 'center', 'right']:
             warnings.warn(f'Alignment method "{align}" not recognized, defaulting to center alignment.')
             align = 'center'
@@ -177,8 +233,9 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
         date_format = mdates.DateFormatter(date_fmt)
         sdc_df = self.sdc_df.copy()
         fig = plt.figure(**kwargs)
-        # We are organizing the grid in a 5 x 5 matrix so that (TT=Title, HM: Heatmap, TS1/TS2: Time-Series 1/2,
-        # MC: Max Correlations):
+
+        # We are organizing the grid in a 5 x 5 matrix so that (TT=Title, HM: Heatmap, 
+        # TS1/TS2: Time-Series 1/2, MC: Max Correlations):
         # TT TT TT TT TT
         # NA TS1 TS1 NA NA
         # TS2 HM HM MC2 CB
@@ -209,7 +266,7 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
             (sdc_df
             .loc[lambda dd: (dd.lag <= max_lag) & (dd.lag >= min_lag)]
             .pipe(lambda dd: sns.heatmap(dd.pivot(index='date_2', columns='date_1', values='r'), cbar=False,
-                                        mask=dd.pivot(index='date_2', columns='date_1', values='p_value') >= .05,
+                                        mask=dd.pivot(index='date_2', columns='date_1', values='p_value') >= alpha,
                                         cmap='RdBu_r', ax=hm))
             )
 
@@ -217,7 +274,7 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
             (sdc_df
             .loc[lambda dd: (dd.lag <= max_lag) & (dd.lag >= min_lag)]
             .pipe(lambda dd: sns.heatmap(dd.pivot(index='date_2', columns='date_1', values='r'), cbar=False,
-                                        mask=dd.pivot(index='date_2', columns='date_1', values='p_value') >= .05,
+                                        mask=dd.pivot(index='date_2', columns='date_1', values='p_value') >= alpha,
                                         cmap='plasma', ax=hm))
             )
         # Add identity line to ease shift visualization
@@ -298,21 +355,30 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
         colors = {'Max $r$': '#A81529', 'Min $r$ (abs)': '#144E8A'}
         if min_lag < 0:
             mc1 = fig.add_subplot(gs[-1, 1:3])
+            # Handle date adjustment based on index type
+            timedelta_offset = pd.to_timedelta(left_offset * freq_mult, unit=freq_unit)
+            date_adjustment = lambda dd: dd.date_1 + timedelta_offset
+            
             (self.sdc_df
-            .loc[lambda dd: dd.p_value < alpha]
-            .loc[lambda dd: (dd.lag <= max_lag) & (dd.lag >= min_lag)]
-            .groupby('date_1')
-            .apply(lambda dd: dd.loc[dd['r'].abs() == dd['r'].abs().max()].loc[lambda d: d['lag'] == d['lag'].min()])
-            .reset_index(drop=True)
+            .query('p_value < @alpha')
+            .query('(lag <= @max_lag) & (lag >= @min_lag)')
             .groupby('date_1')
             .agg(r_max=('r', lambda x: x.where(x > 0).max()), r_min=('r', lambda x: abs(x.where(x < 0).min())))
             .rename(columns={'r_max': 'Max $r$', 'r_min': 'Min $r$ (abs)'})
             .reset_index()
             .melt('date_1')
-            .assign(date_1=lambda dd: dd.date_1 + pd.to_timedelta(left_offset * freq_mult, unit=freq_unit))
+            .assign(date_1=date_adjustment)
             .assign(color=lambda dd: dd.variable.apply(lambda x: colors[x]))
-            .plot.scatter(x='date_1', y='value', c='color', ax=mc1, style='-', alpha=1, colorbar=False, s=10)
-            )
+            .plot
+            .scatter(
+                x='date_1', 
+                y='value', 
+                c='color', 
+                ax=mc1, 
+                alpha=.7, 
+                colorbar=False, 
+                linewidths=0,
+            ))
             plt.setp(mc1.get_xticklabels(), visible=False)
             mc1.set_xlabel('')
             mc1.set_ylabel('Max |corr|')
@@ -323,17 +389,32 @@ def combi_plot(self, alpha: float = .05, xlabel: str = '', ylabel: str = '', tit
             mc1.set_yticks([0, .5, 1])
         if max_lag > 0:
             mc2 = fig.add_subplot(gs[2:4, 3])
+
+            # Handle date adjustment based on index type
+  
+            timedelta_offset = pd.to_timedelta(left_offset * freq_mult, unit=freq_unit)
+            date_adjustment = lambda dd: dd.date_2 + timedelta_offset
+
             (self.sdc_df
             .loc[lambda dd: dd.p_value < alpha]
             .loc[lambda dd: (dd.lag <= max_lag) & (dd.lag >= min_lag)]
             .groupby('date_2')
-            .agg(r_max=('r', lambda x: x.where(x > 0).max()), r_min=('r', lambda x: abs(x.where(x < 0).min())))
+            .agg(r_max=('r', lambda x: x.where(x > 0).max()), 
+                 r_min=('r', lambda x: abs(x.where(x < 0).min())))
             .rename(columns={'r_max': 'Max $r$', 'r_min': 'Min $r$ (abs)'})
             .reset_index()
             .melt('date_2')
-            .assign(date_2=lambda dd: dd.date_2 + pd.to_timedelta(left_offset * freq_mult, unit=freq_unit))
+            .assign(date_2=date_adjustment)
             .assign(color=lambda dd: dd.variable.apply(lambda x: colors[x]))
-            .plot.scatter(x='value', y='date_2', c='color', ax=mc2, style='o', alpha=.7, colorbar=False)
+            .plot
+            .scatter(
+                x='value', 
+                y='date_2', 
+                c='color', 
+                ax=mc2, 
+                alpha=.7, 
+                colorbar=False, 
+                linewidths=0,)
             )
             plt.setp(mc2.get_yticklabels(), visible=False)
             mc2.set_xlabel('Max |corr|')
@@ -357,13 +438,14 @@ def _encode_plot(
     max_lag: float,
     *,
     labels_fontsize: int = 12,
-    plot_title: Optional[str] = None,
     show_colorbar: bool = True,
     show_ts2: bool = True,
     plot_dpi: int = 150,
     figsize: tuple[float, float] = (7, 7),
-) -> str:
-    buffer = io.BytesIO()
+    alpha: float = 0.05,
+) -> tuple[str, str]:
+    png_buffer = io.BytesIO()
+    svg_buffer = io.StringIO()
     fig = combi_plot(
         analysis,
         xlabel=ts1,
@@ -371,36 +453,49 @@ def _encode_plot(
         wspace=.15,
         hspace=.15,
         date_fmt="%Y-%m",
-        alpha=0.05,
+        alpha=alpha,
         labels_fontsize=labels_fontsize,
         max_lag=max_lag,
         min_lag=min_lag,
         metric_label=metric_maps.get(analysis.method, analysis.method),
         figsize=figsize,
-        title=plot_title if plot_title else None,
+        title=None,
         show_colorbar=show_colorbar,
         show_ts2=show_ts2,
     )
-    fig.savefig(buffer, format="png", dpi=plot_dpi, bbox_inches="tight")
+    fig.savefig(png_buffer, format="png", dpi=plot_dpi, bbox_inches="tight")
+    fig.savefig(svg_buffer, format="svg", bbox_inches="tight")
     plt.close(fig)
-    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return base64.b64encode(png_buffer.getvalue()).decode("utf-8"), svg_buffer.getvalue()
 
 
 def render_sdc_plot_from_payload(
     payload: Dict[str, Any],
     *,
-    plot_title: Optional[str] = None,
     labels_fontsize: int = 12,
     show_colorbar: bool = True,
     show_ts2: bool = True,
     plot_dpi: int = 300,
     figsize: tuple[float, float] = (7, 7),
-) -> str:
+    min_lag_override: Optional[int] = None,
+    max_lag_override: Optional[int] = None,
+    alpha: float = 0.05,
+) -> tuple[str, str]:
     analysis = _deserialize_analysis(payload)
     min_lag = payload.get("min_lag")
     max_lag = payload.get("max_lag")
     min_lag = -np.inf if min_lag is None else float(min_lag)
     max_lag = np.inf if max_lag is None else float(max_lag)
+    if min_lag_override is not None:
+        try:
+            min_lag = int(min_lag_override)
+        except (TypeError, ValueError):
+            pass
+    if max_lag_override is not None:
+        try:
+            max_lag = int(max_lag_override)
+        except (TypeError, ValueError):
+            pass
     return _encode_plot(
         analysis,
         payload.get("ts1_label", "Time Series 1"),
@@ -408,11 +503,11 @@ def render_sdc_plot_from_payload(
         min_lag,
         max_lag,
         labels_fontsize=labels_fontsize,
-        plot_title=plot_title,
         show_colorbar=show_colorbar,
         show_ts2=show_ts2,
         plot_dpi=plot_dpi,
         figsize=figsize,
+        alpha=alpha,
     )
 
 
@@ -461,11 +556,16 @@ def run_sdc_analysis(
     min_lag: int,
     max_lag: int,
     window: int,
-    plot_title: Optional[str] = None,
+    n_permutations: Optional[int] = None,
     labels_fontsize: Optional[int] = None,
     plot_dpi: Optional[int] = None,
+    alpha: Optional[float] = None,
     show_colorbar: bool = True,
     show_ts2: bool = True,
+    plot_width: Optional[float] = None,
+    plot_height: Optional[float] = None,
+    plot_min_lag: Optional[int] = None,
+    plot_max_lag: Optional[int] = None,
 ) -> Dict[str, Any]:
     job = get_current_job()
     if job is not None:
@@ -481,9 +581,41 @@ def run_sdc_analysis(
         max_lag = np.inf if max_lag is None else int(max_lag)
         labels_fontsize = int(labels_fontsize) if labels_fontsize else 12
         plot_dpi = int(plot_dpi) if plot_dpi else 150
-        plot_title = plot_title.strip() if plot_title else None
         show_colorbar = bool(show_colorbar)
         show_ts2 = bool(show_ts2)
+        try:
+            n_permutations = int(n_permutations) if n_permutations is not None else 99
+        except (TypeError, ValueError):
+            n_permutations = 99
+        if n_permutations < 0:
+            n_permutations = 0
+        permutations_enabled = n_permutations > 0
+
+        try:
+            alpha = float(alpha) if alpha not in (None, '') else 0.05
+        except (TypeError, ValueError):
+            alpha = 0.05
+        if not 0 < alpha <= 1:
+            alpha = 0.05
+
+        plot_width = float(plot_width) if plot_width else 7.0
+        plot_height = float(plot_height) if plot_height else 7.0
+        if plot_width <= 0:
+            plot_width = 7.0
+        if plot_height <= 0:
+            plot_height = 7.0
+
+        def _coerce_lag(value, fallback):
+            if value is None or value == "":
+                return fallback
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return fallback
+
+        plot_min_lag = _coerce_lag(plot_min_lag, min_lag)
+        plot_max_lag = _coerce_lag(plot_max_lag, max_lag)
+
         df = _build_analysis_dataframe(data, date_column)
         analysis = sdc.SDCAnalysis(
             ts1=df[ts1],
@@ -492,20 +624,23 @@ def run_sdc_analysis(
             min_lag=min_lag,
             max_lag=max_lag,
             fragment_size=fragment_size,
+            n_permutations=n_permutations,
+            permutations=permutations_enabled,
         )
 
         analysis_payload = _serialize_analysis(analysis, ts1, ts2, min_lag, max_lag)
-        plot_b64 = _encode_plot(
+        plot_png, plot_svg = _encode_plot(
             analysis,
             ts1,
             ts2,
-            min_lag,
-            max_lag,
+            plot_min_lag,
+            plot_max_lag,
             labels_fontsize=labels_fontsize,
-            plot_title=plot_title,
             show_colorbar=show_colorbar,
             show_ts2=show_ts2,
             plot_dpi=plot_dpi,
+            figsize=(plot_width, plot_height),
+            alpha=alpha,
         )
         excel_bytes = _build_excel_payload(analysis)
 
@@ -522,15 +657,22 @@ def run_sdc_analysis(
         summary_min = None if not math.isfinite(min_lag) else min_lag
         summary_max = None if not math.isfinite(max_lag) else max_lag
         plot_settings = {
-            "title": plot_title or '',
             "label_fontsize": labels_fontsize,
             "dpi": plot_dpi,
             "show_colorbar": show_colorbar,
             "show_ts2": show_ts2,
+            "width": plot_width,
+            "height": plot_height,
+            "min_lag": None if not math.isfinite(plot_min_lag) else plot_min_lag,
+            "max_lag": None if not math.isfinite(plot_max_lag) else plot_max_lag,
+            "n_permutations": n_permutations,
+            "permutations": permutations_enabled,
+            "alpha": alpha,
         }
 
         return {
-            "image": plot_b64,
+            "image": plot_png,
+            "image_svg": plot_svg,
             "excel": base64.b64encode(excel_bytes).decode("utf-8"),
             "analysis": analysis_payload,
             "plot_settings": plot_settings,
@@ -539,6 +681,9 @@ def run_sdc_analysis(
                 "window": fragment_size,
                 "min_lag": summary_min,
                 "max_lag": summary_max,
+                "n_permutations": n_permutations,
+                "permutations": permutations_enabled,
+                "alpha": alpha,
                 "plot": plot_settings,
             },
         }
