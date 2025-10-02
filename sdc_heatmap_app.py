@@ -21,7 +21,10 @@ from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 
 FILEPATH = 'data/oni_sdc_results_example.xlsx'
-
+METHOD_LABELS = {
+    'pearson': "Pearson's r",
+    'spearman': "Spearman's rho",
+}
 
 
 def build_figure(grid: pd.DataFrame,
@@ -42,7 +45,7 @@ def build_figure(grid: pd.DataFrame,
         row_heights=[0.13, 0.74, 0.13],
         column_widths=[0.13, 0.74, 0.13],
         specs=[
-            [{"type": "xy"}, {"type": "xy"}, {"type": "xy"}],
+            [None, {"type": "xy"}, None],
             [{"type": "xy"}, {"type": "heatmap"}, {"type": "xy"}],
             [None,        {"type": "xy"},    None],
         ],
@@ -84,7 +87,7 @@ def build_figure(grid: pd.DataFrame,
             zmax=1, 
             zmid=0,
             colorbar=dict(
-                title="Pearson's r",
+                title=METHOD_LABELS[method],
                 lenmode='fraction',
                 len=0.6,
                 outlinewidth=2,
@@ -100,8 +103,8 @@ def build_figure(grid: pd.DataFrame,
     # Top: TS1 
     ts1 = ts_df.dropna(subset=['start_1', 'ts1'])
     ts1_ymin, ts1_ymax = ts1['ts1'].min(), ts1['ts1'].max()
-    full_range_ts1 = ts1_ymax - ts1_ymin
-    ts1_offset = 0.1 * full_range_ts1
+    ts1_range = ts1_ymax - ts1_ymin
+
     fig.add_trace(
         go.Scatter(x=ts1['start_1'], y=ts1['ts1'], mode='lines',
                    line=dict(color='black', width=2), name='ts1', showlegend=False),
@@ -112,8 +115,9 @@ def build_figure(grid: pd.DataFrame,
             x=[],
             y=[],
             mode='lines',
-            line=dict(color='#007595', width=3),
+            line=dict(color="#016B8B", width=3),
             name='ts1-highlight',
+            opacity=1,
             hoverinfo='skip',
             showlegend=False,
         ),
@@ -122,9 +126,8 @@ def build_figure(grid: pd.DataFrame,
 
     # Left: TS2
     ts2 = ts_df.dropna(subset=['start_2', 'ts2'])
-    ts2_ymin, ts2_ymax = ts2['ts2'].min(), ts2['ts2'].max()
-    full_range_ts2 = ts2_ymax - ts2_ymin
-    ts2_offset = 0.1 * full_range_ts2
+    ts2_min, ts2_max = ts2['ts2'].min(), ts2['ts2'].max()
+    ts2_range = ts2_max - ts2_min
     fig.add_trace(
         go.Scatter(x=ts2['ts2'], y=ts2['start_2'], mode='lines',
                    line=dict(color='black', width=2), name='ts2', showlegend=False),
@@ -135,7 +138,8 @@ def build_figure(grid: pd.DataFrame,
             x=[],
             y=[],
             mode='lines',
-            line=dict(color='#007595', width=3),
+            line=dict(color="#016B8B", width=3),
+            opacity=1,
             name='ts2-highlight',
             hoverinfo='skip',
             showlegend=False,
@@ -202,6 +206,7 @@ def build_figure(grid: pd.DataFrame,
             x1=fragment_size,
             y1=0,
             line=dict(color='black', width=6),
+            opacity=1,
             row=2,
             col=2,
         )
@@ -212,18 +217,19 @@ def build_figure(grid: pd.DataFrame,
             x1=0,
             y1=fragment_size,
             line=dict(color='black', width=6),
+            opacity=1,
             row=2,
             col=2,
         )
         fig.add_annotation(
-            x=.05 * len(ts1),
+            x=.07 * len(ts1),
             y=.03 * len(ts2),
             text=f's = {fragment_size}',
             showarrow=False,
             font=dict(color='black', size=14),
             row=2, col=2,
         )
-    highlight_fill = 'rgba(27, 24, 24, 0.4)'
+    highlight_fill = 'white'
     fig.add_shape(
         type='rect',
         name='ts1-mask-left',
@@ -232,6 +238,7 @@ def build_figure(grid: pd.DataFrame,
         x1=0,
         y1=0,
         fillcolor=highlight_fill,
+        opacity=.8,
         line=dict(width=0),
         visible=False,
         layer='above',
@@ -246,6 +253,7 @@ def build_figure(grid: pd.DataFrame,
         y1=0,
         fillcolor=highlight_fill,
         line=dict(width=0),
+        opacity=.8,
         visible=False,
         layer='above',
         row=1, col=2,
@@ -258,6 +266,7 @@ def build_figure(grid: pd.DataFrame,
         x1=0,
         y1=0,
         fillcolor=highlight_fill,
+        opacity=.8,
         line=dict(width=0),
         visible=False,
         layer='above',
@@ -271,6 +280,7 @@ def build_figure(grid: pd.DataFrame,
         x1=0,
         y1=0,
         fillcolor=highlight_fill,
+        opacity=.8,
         line=dict(width=0),
         visible=False,
         layer='above',
@@ -278,43 +288,40 @@ def build_figure(grid: pd.DataFrame,
     )
 
     # Axis + layout styling
-    fig.update_yaxes(row=2, col=1, autorange='reversed')
-    fig.update_xaxes(title='', showgrid=False, row=1, col=2)
-    fig.update_yaxes(title='', row=1, col=2, range=[-2, 2])
+    side_panel_kwargs = dict(
+        showline=True, 
+        linewidth=1.5, 
+        linecolor='black', 
+        mirror=True, 
+        showgrid=False,
+        )
+    for row in range(1, 4):
+        for col in range(1, 4):
+            if not (row==2 and col==2):
+                fig.update_xaxes(row=row, col=col, **side_panel_kwargs)
+                fig.update_yaxes(row=row, col=col, **side_panel_kwargs)
+    
 
-    fig.update_xaxes(title='', showgrid=False, row=2, col=2)
-    fig.update_yaxes(title='', showgrid=False, autorange='reversed', row=2, col=2)
+    hm_kwargs = dict(showline=False, linewidth=0, linecolor='black', mirror=False, ticks='')
+    fig.update_xaxes(row=2, col=2, **hm_kwargs)
+    fig.update_yaxes(row=2, col=2, **hm_kwargs)
 
-    fig.update_xaxes(title='Max r', range=[1, 0], row=2, col=3)
-    fig.update_yaxes(title='', showgrid=False, row=2, col=3)
-
-    fig.update_xaxes(title='', showgrid=False, row=2, col=1)
-    fig.update_yaxes(title='', showgrid=False, row=2, col=1)
-
-    fig.update_xaxes(title='', showgrid=False, row=3, col=2)
-    fig.update_yaxes(title='Max r', showgrid=False, row=3, col=2, range=[0, 1])
+    fig.update_xaxes(row=1, col=2, side='top', showticklabels=True)
+    fig.update_yaxes(row=1, col=2, range=[ts1_ymin - ts1_range * 0.1, ts1_ymax + ts1_range * 0.1])
+    fig.update_yaxes(row=2, col=1, range=[len(ts2) * 1.05,  - 0.05 * len(ts2)])
+    fig.update_xaxes(row=2, col=1, autotickangles=[0], range=[ts2_max + ts2_range * 0.1,
+                                                             ts2_min - ts2_range * 0.1,])
+    
+    fig.update_xaxes(row=2, col=3, range=[1.01, -0.01])
+    fig.update_yaxes(row=2, col=3, ticks='')
+    fig.update_yaxes(row=3, col=2, range=[-0.01, 1.01])
+    fig.update_xaxes(row=3, col=2, range=[-len(ts1) * .05, len(ts1) * 1.05], 
+                    showticklabels=False, ticks='')
 
     fig.update_layout(
         margin=dict(l=40, r=40, t=40, b=40),
-        template='simple_white',
-        hovermode='closest',
-                            
+        template='simple_white',                            
     )
-
-    for row in [1, 2, 3]:
-        for col in [1, 2, 3]:
-            if col == 2 and row == 2:
-                # no border or ticks on heatmap
-                fig.update_xaxes(showline=False, linewidth=0, linecolor='black', 
-                                mirror=False, row=row, col=col, ticks='')
-                fig.update_yaxes(showline=False, linewidth=0, linecolor='black', 
-                                mirror=False, row=row, col=col, ticks='')
-            else:
-                # pass
-                fig.update_xaxes(showline=True, linewidth=1.5, linecolor='black', 
-                                mirror=True, row=row, col=col)
-                fig.update_yaxes(showline=True, linewidth=1.5, linecolor='black', 
-                                mirror=True, row=row, col=col)
 
     return fig
 
@@ -505,15 +512,17 @@ def _highlight_hover(hover_data, fragment_size, figure_state):
     ts2_x_min, ts2_x_max = float(np.min(ts2_x)), float(np.max(ts2_x))
 
     left_shape = patch['layout']['shapes'][shape_indices['ts1-mask-left']]
+    ts1_y_range = ts1_y_max - ts1_y_min
+    ts2_x_range = ts2_x_max - ts2_x_min
     if ts1_low_raw > ts1_min:
         left_x0 = ts1_min
         left_x1 = min(ts1_low_raw, ts1_max)
         if left_x1 > left_x0:
             left_shape['visible'] = True
-            left_shape['x0'] = left_x0
+            left_shape['x0'] = left_x0 - 1
             left_shape['x1'] = left_x1
-            left_shape['y0'] = ts1_y_min
-            left_shape['y1'] = ts1_y_max
+            left_shape['y0'] = ts1_y_min - ts1_y_range * 0.025
+            left_shape['y1'] = ts1_y_max + ts1_y_range * 0.025
         else:
             left_shape['visible'] = False
     else:
@@ -526,9 +535,9 @@ def _highlight_hover(hover_data, fragment_size, figure_state):
         if right_x1 > right_x0:
             right_shape['visible'] = True
             right_shape['x0'] = right_x0
-            right_shape['x1'] = right_x1
-            right_shape['y0'] = ts1_y_min
-            right_shape['y1'] = ts1_y_max
+            right_shape['x1'] = right_x1 + 1 
+            right_shape['y0'] = ts1_y_min - ts1_y_range * 0.025
+            right_shape['y1'] = ts1_y_max + ts1_y_range * 0.025
         else:
             right_shape['visible'] = False
     else:
@@ -542,7 +551,7 @@ def _highlight_hover(hover_data, fragment_size, figure_state):
             bottom_shape['visible'] = True
             bottom_shape['x0'] = ts2_x_min
             bottom_shape['x1'] = ts2_x_max
-            bottom_shape['y0'] = bottom_y0
+            bottom_shape['y0'] = bottom_y0 - 1
             bottom_shape['y1'] = bottom_y1
         else:
             bottom_shape['visible'] = False
@@ -558,7 +567,7 @@ def _highlight_hover(hover_data, fragment_size, figure_state):
             top_shape['x0'] = ts2_x_min
             top_shape['x1'] = ts2_x_max
             top_shape['y0'] = top_y0
-            top_shape['y1'] = top_y1
+            top_shape['y1'] = top_y1 + 1
         else:
             top_shape['visible'] = False
     else:
