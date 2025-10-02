@@ -29,6 +29,8 @@ def build_figure(grid: pd.DataFrame,
                 fragment_size: int,
                 method: str = 'pearson',
                 alpha: float = 0.05,
+                min_lag: float | None = None,
+                max_lag: float | None = None,
                 ) -> go.Figure:
     
     # Reserve a 3x3 layout: heatmap in center; top=ts1, left=ts2, bottom/right=max r
@@ -59,6 +61,14 @@ def build_figure(grid: pd.DataFrame,
     # Align
     p = p.reindex(index=z.index, columns=z.columns)
     z = z.where(p < alpha)
+    lags = z.index.to_numpy()[:, None] - z.columns.to_numpy()[None, :]
+    mask = np.ones_like(lags, dtype=bool)
+    if min_lag is not None:
+        mask &= lags >= min_lag
+    if max_lag is not None:
+        mask &= lags <= max_lag
+    z = z.where(mask)
+    p = p.where(mask)
 
 
     # Central heatmap
@@ -199,6 +209,12 @@ app.layout = html.Div(
             html.Span('Alpha: ', style={'marginRight': '8px'}),
             dcc.Input(id='alpha-input', type='number', value=0.05, min=0.0, max=1.0, step=0.01,
                       style={'width': '100px'}),
+            html.Span('Min lag: ', style={'marginRight': '8px'}),
+            dcc.Input(id='min-lag-input', type='number', value=None, step=1,
+                      style={'width': '100px'}),
+            html.Span('Max lag: ', style={'marginRight': '8px'}),
+            dcc.Input(id='max-lag-input', type='number', value=None, step=1,
+                      style={'width': '100px'}),
             html.Span(id='data-status', style={'marginLeft': '16px'}),
         ], style={'display': 'flex', 'alignItems': 'center', 'gap': '12px', 'marginBottom': '8px'}),
         dcc.Graph(id='sdc-heatmap', style={'height': '720px'}),
@@ -213,9 +229,11 @@ app.layout = html.Div(
     Output('data-status', 'children'),
     Output('fragment-size-store', 'data'),
     Input('alpha-input', 'value'),
+    Input('min-lag-input', 'value'),
+    Input('max-lag-input', 'value'),
     prevent_initial_call=False
 )
-def _load(alpha):
+def _load(alpha, min_lag, max_lag):
     # Read with index_col=0 to recover the grid index
     try:
         rs_grid = pd.read_excel(FILEPATH, sheet_name=0, index_col=0)
@@ -229,13 +247,32 @@ def _load(alpha):
         alpha_val = float(alpha) if alpha is not None else 0.05
     except (TypeError, ValueError):
         alpha_val = 0.05
+    min_lag_val = None
+    if min_lag is not None:
+        try:
+            min_lag_val = float(min_lag)
+        except (TypeError, ValueError):
+            min_lag_val = None
+    max_lag_val = None
+    if max_lag is not None:
+        try:
+            max_lag_val = float(max_lag)
+        except (TypeError, ValueError):
+            max_lag_val = None
     s = config['fragment_size'].values[0]
     method = config['method'].values[0]
 
-
     fig = build_figure(rs_grid, pvals=pv_grid, ts_df=ts_df, alpha=alpha_val,
-                      fragment_size=s, method=method)
-    return fig, f'Loaded grid {rs_grid.shape[0]}×{rs_grid.shape[1]}, alpha={alpha_val:.3f}', int(s)
+                      fragment_size=s, method=method, min_lag=min_lag_val, max_lag=max_lag_val)
+    status = f'Loaded grid {rs_grid.shape[0]}×{rs_grid.shape[1]}, alpha={alpha_val:.3f}'
+    lag_terms = []
+    if min_lag_val is not None:
+        lag_terms.append(f'lag≥{min_lag_val:g}')
+    if max_lag_val is not None:
+        lag_terms.append(f'lag≤{max_lag_val:g}')
+    if lag_terms:
+        status += ', ' + ', '.join(lag_terms)
+    return fig, status, int(s)
 
 
 if __name__ == '__main__':
