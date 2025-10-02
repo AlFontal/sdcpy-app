@@ -149,6 +149,56 @@ def build_figure(grid: pd.DataFrame,
         row=3, col=2,
     )
 
+    # Annotations: fragment size, lag=0 diagonal
+    cols_numeric = pd.to_numeric(pd.Index(z.columns), errors='coerce').to_numpy()
+    rows_numeric = pd.to_numeric(pd.Index(z.index), errors='coerce').to_numpy()
+    cols_clean = cols_numeric[~np.isnan(cols_numeric)]
+    rows_clean = rows_numeric[~np.isnan(rows_numeric)]
+    diag_vals = np.intersect1d(cols_clean, rows_clean)
+    if diag_vals.size > 1:
+        fig.add_trace(
+            go.Scatter(
+                x=diag_vals,
+                y=diag_vals,
+                mode='lines',
+                line=dict(color='black', dash='dot', width=1.5),
+                hoverinfo='skip',
+                showlegend=False,
+                name='Lag 0',
+            ),
+            row=2, col=2,
+        )
+    if cols_clean.size and rows_clean.size:
+
+        fig.add_shape(
+            type='line',
+            x0=0,
+            y0=0,
+            x1=fragment_size,
+            y1=0,
+            line=dict(color='black', width=6),
+            row=2,
+            col=2,
+        )
+        fig.add_shape(
+            type='line',
+            x0=0,
+            y0=0,
+            x1=0,
+            y1=fragment_size,
+            line=dict(color='black', width=6),
+            row=2,
+            col=2,
+        )
+        fig.add_annotation(
+            x=.05 * len(ts1),
+            y=.03 * len(ts2),
+            text=f's = {fragment_size}',
+            showarrow=False,
+            font=dict(color='black', size=14),
+            row=2, col=2,
+        )
+
     # Axis + layout styling
     fig.update_yaxes(row=2, col=1, autorange='reversed')
     fig.update_xaxes(title='', showgrid=False, row=1, col=2)
