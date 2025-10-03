@@ -148,6 +148,44 @@ def build_progress_content(progress=None):
     return components
 
 
+def format_elapsed_time(seconds: float | None) -> str | None:
+    if seconds is None:
+        return None
+
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        return None
+
+    if seconds < 0:
+        return None
+
+    if seconds < 1:
+        return f"{seconds * 1000:.0f} ms"
+
+    minutes, secs = divmod(seconds, 60)
+    if minutes < 1:
+        return f"{secs:.1f} s"
+
+    hours, minutes = divmod(minutes, 60)
+    secs = int(round(secs))
+    parts: list[str] = []
+
+    if hours >= 1:
+        parts.append(f"{int(hours)} h")
+
+    if minutes >= 1:
+        parts.append(f"{int(minutes)} min")
+
+    if secs > 0 and len(parts) < 2:
+        parts.append(f"{secs} s")
+
+    if not parts:
+        return f"{seconds:.1f} s"
+
+    return ' '.join(parts)
+
+
 def build_column_defs(df: pd.DataFrame):
     column_defs = []
     for col in df.columns:
@@ -1310,7 +1348,10 @@ def manage_job(job_data, _):
         alert = dbc.Alert('The analysis failed. Check the logs and try again.', color='danger')
         return [alert], False, True, no_update, None, False, dash.no_update, True, True, True, True
 
-    progress = job.meta.get('progress', {})
+    job_meta = job.meta or {}
+    progress = job_meta.get('progress') or {}
+    analysis_duration = job_meta.get('analysis_duration')
+    analysis_completed = job_meta.get('analysis_completed')
 
     if job.is_finished:
         result = job.result
@@ -1318,10 +1359,15 @@ def manage_job(job_data, _):
             alert = dbc.Alert('No result was returned by the analysis.', color='warning')
             return [alert], False, True, no_update, None, False, dash.no_update, True, True, True, True
 
-        image_div = html.Img(
-            src=f"data:image/png;base64,{result['image']}",
-            id='sdc-results-img',
-            style={'cursor': 'zoom-in'}
+        image_div = dcc.Loading(
+            html.Img(
+                src=f"data:image/png;base64,{result['image']}",
+                id='sdc-results-img',
+                style={'cursor': 'zoom-in'}
+            ),
+            type='circle',
+            color='#4f46e5',
+            className='plot-loading'
         )
         download_button = dbc.Button('Download', id='download-button', color='secondary')
         xlsx_button = dbc.Button('XLSX', id='download-results-xlsx-button', color='secondary', outline=True)
@@ -1341,10 +1387,45 @@ def manage_job(job_data, _):
             image_div,
         ]
 
+        duration_label = format_elapsed_time(analysis_duration)
+        if duration_label:
+            results_children.insert(
+                1,
+                html.Div(
+                    html.Span(
+                        f'Analysis completed in {duration_label}.',
+                        className='analysis-summary-text'
+                    ),
+                    className='analysis-summary-banner'
+                )
+            )
+
         total = progress.get('total') or 1
         success_progress = build_progress_content({'description': 'Completed', 'current': total, 'total': total})
 
         return success_progress, True, True, results_children, result, False, 'Re-run SDC Analysis', False, False, True, False
+
+    if analysis_completed:
+        duration_label = format_elapsed_time(analysis_duration)
+        heading = 'Analysis completed'
+        if duration_label:
+            heading = f'Analysis completed in {duration_label}'
+        progress_children = [
+            html.Div(
+                [
+                    dbc.Spinner(color='primary', size='sm', spinnerClassName='analysis-status-spinner'),
+                    html.Div(
+                        [
+                            html.Strong(heading, className='analysis-status-heading'),
+                            html.Span('Generating static plot…', className='analysis-status-subtext'),
+                        ],
+                        className='analysis-status-copy'
+                    ),
+                ],
+                className='analysis-status-banner'
+            )
+        ]
+        return progress_children, False, False, no_update, no_update, True, dash.no_update, True, False, False, True
 
     running_progress = build_progress_content(progress)
     return running_progress, False, False, no_update, no_update, True, dash.no_update, True, False, False, True

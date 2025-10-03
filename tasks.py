@@ -6,6 +6,7 @@ import io
 import math
 import base64
 import re
+import time
 import warnings
 import numpy as np
 import pandas as pd
@@ -576,6 +577,7 @@ def run_sdc_analysis(
     sdc.tqdm = patched_tqdm
 
     try:
+        analysis_timer = time.perf_counter()
         fragment_size = int(window)
         min_lag = -np.inf if min_lag is None else int(min_lag)
         max_lag = np.inf if max_lag is None else int(max_lag)
@@ -627,6 +629,17 @@ def run_sdc_analysis(
             n_permutations=n_permutations,
             permutations=permutations_enabled,
         )
+
+        if job is not None:
+            analysis_duration = time.perf_counter() - analysis_timer
+            job.meta["analysis_completed"] = True
+            job.meta["analysis_duration"] = analysis_duration
+            job.meta["progress"] = {
+                "current": None,
+                "total": None,
+                "description": "Generating static plot…",
+            }
+            job.save_meta()
 
         analysis_payload = _serialize_analysis(analysis, ts1, ts2, min_lag, max_lag)
         plot_png, plot_svg = _encode_plot(
