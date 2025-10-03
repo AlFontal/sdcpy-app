@@ -896,17 +896,74 @@ def update_output(content, example_clicks, filename):
 
 
 
-@app.callback([Output('ts1-dropdown', 'options'),
-               Output('ts2-dropdown', 'options'),
-               Output('date-dropdown', 'options')],
-              Input('data-memory-store', 'data'))
-def update_series(data):
-    if data is not None:
-        df = pd.DataFrame(data)
-        options = [{'value': col, 'label': col} for col in df.columns]
-        return options, options, options
-    else:
+def _infer_numeric_columns(df: pd.DataFrame) -> list[str]:
+    numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
+    if numeric_cols:
+        return numeric_cols
+
+    fallback: list[str] = []
+    for col in df.columns:
+        series = pd.to_numeric(df[col], errors='coerce')
+        if series.notna().all():
+            fallback.append(col)
+    return fallback
+
+
+def _infer_datetime_column(df: pd.DataFrame, report: dict | None) -> str | None:
+    report = report or {}
+    for info in report.get('date_columns', []):
+        if info.get('status') in {'converted', 'datetime'}:
+            column = info.get('column')
+            if column in df.columns:
+                return column
+
+    for col in df.columns:
+        series = df[col]
+        parsed = pd.to_datetime(series, errors='coerce')
+        if parsed.notna().all():
+            return col
+    return None
+
+
+@app.callback(
+    Output('ts1-dropdown', 'options'),
+    Output('ts1-dropdown', 'value'),
+    Output('ts2-dropdown', 'options'),
+    Output('ts2-dropdown', 'value'),
+    Output('date-dropdown', 'options'),
+    Output('date-dropdown', 'value'),
+    Output('window', 'value'),
+    Input('data-memory-store', 'data'),
+    State('date-report-store', 'data'),
+)
+def update_series(data, report):
+    if data is None:
         raise PreventUpdate
+
+    df = pd.DataFrame(data)
+    options = [{'value': col, 'label': col} for col in df.columns]
+
+    numeric_cols = _infer_numeric_columns(df)
+    ts1_value = numeric_cols[0] if numeric_cols else None
+    ts2_value = numeric_cols[1] if len(numeric_cols) > 1 else ts1_value
+
+    date_value = _infer_datetime_column(df, report)
+
+    total_rows = len(df.index)
+    window_value = None
+    if total_rows:
+        inferred = max(1, int(round(total_rows * 0.2)))
+        window_value = inferred
+
+    return (
+        options,
+        ts1_value,
+        options,
+        ts2_value,
+        options,
+        date_value,
+        window_value,
+    )
 
 
 @app.callback(
