@@ -12,6 +12,8 @@ import pandas as pd
 import dash_ag_grid as dag
 import dash_bootstrap_components as dbc
 
+from typing import cast
+
 from rq import Queue
 from rq.job import Job
 from rq.exceptions import NoSuchJobError
@@ -324,7 +326,7 @@ def build_sanitization_alert(report: dict):
 def prepare_dataset_payload(original_df: pd.DataFrame,
                             sanitized_df: pd.DataFrame,
                             filename: str,
-                            report: dict):
+                            report: dict | None):
     report = report or {}
     report.setdefault('filename', filename)
     grid_df = sanitized_df.copy()
@@ -346,15 +348,16 @@ def prepare_dataset_payload(original_df: pd.DataFrame,
     original_serialized_df = original_serialized_df.where(original_serialized_df.notna(), None)
     original_serialized = original_serialized_df.to_dict('list')
     sanitization_alert = build_sanitization_alert(report)
-    preview_title = f'Dataset Preview – {len(sanitized_df):,} rows × {len(sanitized_df.columns):,} columns (first 10 shown)'
+    preview_title = f'Dataset Preview – {len(sanitized_df):,} rows × {len(sanitized_df.columns):,} columns'
     return (
         original_serialized,
         sanitized_serialized,
         row_data,
         column_defs,
         html.P(filename, className='upload-filename'),
-        False,  # parameters card visible
-        False,  # plot card visible
+    False,  # parameters card visible
+    False,  # preview card visible
+    False,  # plot card visible
         False,  # run button container visible
         True,   # divider hidden until run starts
         True,   # progress container hidden
@@ -676,6 +679,7 @@ table_preview = dbc.Card(
     ],
     className='table-card collapsible-card'
 )
+table_preview_container = html.Div(table_preview, hidden=True, id='preview-card-container')
 progress_div = html.Div(id='progress-div', className='card-section')
 results_div = html.Div(id='results-div', className='card-section')
 
@@ -736,6 +740,7 @@ def parse_contents(contents, filename):
                Output('data-grid', 'columnDefs'),
                Output('upload-data', 'children'),
                Output('parameters-card-container', 'hidden'),
+               Output('preview-card-container', 'hidden'),
                Output('plot-options-card-container', 'hidden'),
                Output('run-button-container', 'hidden'),
                Output('results-divider', 'hidden'),
@@ -778,6 +783,7 @@ def update_output(content, example_clicks, filename):
                 True,
                 True,
                 True,
+                True,
                 None,
                 'Upload Dataset',
                 'Dataset Preview',
@@ -786,7 +792,12 @@ def update_output(content, example_clicks, filename):
             )
         original_df = pd.read_csv(EXAMPLE_DATASET_PATH)
         sanitized_df, report = sanitize_dataframe(original_df.copy())
-        return prepare_dataset_payload(original_df, sanitized_df, EXAMPLE_DATASET_PATH.name, report)
+        return prepare_dataset_payload(
+            original_df,
+            sanitized_df,
+            EXAMPLE_DATASET_PATH.name,
+            report,
+        )
     if trigger == 'upload-data':
         if content is None:
             raise PreventUpdate
@@ -799,6 +810,7 @@ def update_output(content, example_clicks, filename):
                 no_update,  # grid columns
                 no_update,  # upload preview text
                 True,       # parameters card hidden
+                True,       # preview card hidden
                 True,       # plot card hidden
                 True,       # run button container hidden
                 True,       # divider hidden
@@ -812,7 +824,12 @@ def update_output(content, example_clicks, filename):
                 error,
                 None,      # reset date report
             )
-        return prepare_dataset_payload(original_df, sanitized_df, filename or 'uploaded.csv', report)
+        return prepare_dataset_payload(
+            cast(pd.DataFrame, original_df),
+            cast(pd.DataFrame, sanitized_df),
+            filename or 'uploaded.csv',
+            report,
+        )
     raise PreventUpdate
 
 
@@ -1462,7 +1479,7 @@ content_div = html.Div([title_row,
                         sidebar_toggle_button,
                         instructions_row,
                         file_upload,
-                        table_preview,
+                        table_preview_container,
                         html.Div(parameter_card, hidden=True, id='parameters-card-container'),
                         html.Div(run_button, className='run-button-container', hidden=True, id='run-button-container'),
                         html.Div(progress_div, hidden=True, id='progress-container'),
@@ -1493,4 +1510,4 @@ if __name__ == '__main__':
     # Get port from environment variable, default to 8050
     port = int(os.environ.get('PORT', 8050))
     # Bind to 0.0.0.0 to allow external connections in Docker
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=True)
