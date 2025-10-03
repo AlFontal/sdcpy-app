@@ -80,7 +80,7 @@ DEFAULT_PARAMS = {
     'alpha': 0.05,
 }
 
-EXAMPLE_DATASET_PATH = Path('data') / 'oni_temp_sa.csv'
+EXAMPLE_DATASET_PATH = Path('data') / 'wide_brazil_covid_meteo.csv'
 
 sidebar_content = html.Div(
     [
@@ -627,7 +627,7 @@ file_upload = dbc.Card(
                     children=html.Div('Upload dataset (.csv)', className='upload-box'),
                     className='upload-container'
                 ),
-                dbc.Button('Load example dataset: ONI anomalies vs T anomalies in South America 1998-2024',
+                dbc.Button('Load example dataset: Weekly T, AH and COVID-19 in Brazilian cities',
                             id='load-example-button', color='secondary', outline=True,
                             className='mt-3'),
                 html.Div(id='output-data-upload')
