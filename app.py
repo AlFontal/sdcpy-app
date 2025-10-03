@@ -355,17 +355,20 @@ def prepare_dataset_payload(original_df: pd.DataFrame,
         row_data,
         column_defs,
         html.P(filename, className='upload-filename'),
-    False,  # parameters card visible
-    False,  # preview card visible
-    False,  # plot card visible
-        False,  # run button container visible
+        True,   # parameters card hidden until continue
+        'parameters-card-container',
+        True,   # plot options card hidden
+        True,   # run button container hidden
+        False,  # preview card container visible
+        False,  # continue button container visible
         True,   # divider hidden until run starts
         True,   # progress container hidden
         True,   # results container hidden
-        False,  # run button enabled
+        True,   # run button disabled
+        False,  # continue button enabled
         True,   # update plot button disabled until results exist
         None,   # clear feedback message
-        f'Uploaded dataset: {filename}',
+    f'Uploaded dataset: {filename}',
         preview_title,
         sanitization_alert,
         report,
@@ -460,6 +463,10 @@ def build_date_review_body(report: dict | None,
     return rows
 title_row = html.H2('Scale dependent correlation analysis App', className='page-title')
 
+instructions_row = html.P(
+    'Start by uploading a .csv file with headers containing at least a numerical column and a date column.',
+    className='page-subtitle'
+)
 sidebar_toggle_button = html.Div([
     dbc.Button(
         '☰ Menu',
@@ -477,10 +484,6 @@ sidebar_toggle_button = html.Div([
     )
 ], className='top-controls')
 
-instructions_row = html.P(
-    'Start by uploading a .csv file containing at least a numerical column and a date column with headers.',
-    className='page-subtitle'
-)
 
 ts1_dropdown = dcc.Dropdown(options=[{'label': 'Add dataset to select', 'value': 'Empty'}],
                             placeholder='Select time series 1', id='ts1-dropdown')
@@ -680,6 +683,19 @@ table_preview = dbc.Card(
     className='table-card collapsible-card'
 )
 table_preview_container = html.Div(table_preview, hidden=True, id='preview-card-container')
+continue_button_container = html.Div(
+    dbc.Button(
+        'Continue',
+        id='continue-button',
+        color='primary',
+        className='continue-button',
+        n_clicks=0,
+        disabled=True,
+    ),
+    id='continue-button-container',
+    className='continue-button-container',
+    hidden=True,
+)
 progress_div = html.Div(id='progress-div', className='card-section')
 results_div = html.Div(id='results-div', className='card-section')
 
@@ -740,13 +756,16 @@ def parse_contents(contents, filename):
                Output('data-grid', 'columnDefs'),
                Output('upload-data', 'children'),
                Output('parameters-card-container', 'hidden'),
-               Output('preview-card-container', 'hidden'),
+               Output('parameters-card-container', 'className'),
                Output('plot-options-card-container', 'hidden'),
                Output('run-button-container', 'hidden'),
+               Output('preview-card-container', 'hidden'),
+               Output('continue-button-container', 'hidden'),
                Output('results-divider', 'hidden'),
                Output('progress-container', 'hidden'),
                Output('results-container', 'hidden'),
                Output('run-button', 'disabled', allow_duplicate=True),
+               Output('continue-button', 'disabled'),
                Output('update-plot-button', 'disabled', allow_duplicate=True),
                Output('plot-feedback', 'children', allow_duplicate=True),
                Output('upload-card-title', 'children'),
@@ -775,6 +794,8 @@ def update_output(content, example_clicks, filename):
                 no_update,
                 no_update,
                 no_update,
+                True,
+                'parameters-card-container',
                 True,
                 True,
                 True,
@@ -810,13 +831,16 @@ def update_output(content, example_clicks, filename):
                 no_update,  # grid columns
                 no_update,  # upload preview text
                 True,       # parameters card hidden
-                True,       # preview card hidden
-                True,       # plot card hidden
+                'parameters-card-container',
+                True,       # plot options card hidden
                 True,       # run button container hidden
+                True,       # preview card hidden
+                True,       # continue button container hidden
                 True,       # divider hidden
                 True,       # progress container hidden
                 True,       # results container hidden
                 True,       # run button disabled
+                True,       # continue button disabled
                 True,       # update plot disabled
                 None,       # plot feedback cleared
                 'Upload Dataset',
@@ -984,15 +1008,35 @@ def toggle_upload_collapse(toggle_clicks, data, is_open):
     Output('preview-collapse', 'is_open'),
     Output('preview-card-icon', 'children'),
     Input('toggle-preview-card', 'n_clicks'),
+    Input('continue-button', 'n_clicks'),
+    Input('raw-data-store', 'data'),
     State('preview-collapse', 'is_open'),
     prevent_initial_call=True,
 )
-def toggle_preview_collapse(n_clicks, is_open):
-    if not n_clicks:
+def toggle_preview_collapse(toggle_clicks, continue_clicks, raw_data, is_open):
+    ctx = dash.callback_context
+    if not ctx.triggered:
         raise PreventUpdate
-    new_state = not is_open
-    icon = '▴' if new_state else '▾'
-    return new_state, icon
+
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+
+    if trigger == 'raw-data-store':
+        if raw_data is None:
+            raise PreventUpdate
+        return True, '▴'
+
+    if trigger == 'continue-button':
+        if not continue_clicks:
+            raise PreventUpdate
+        return False, '▾'
+
+    if trigger == 'toggle-preview-card':
+        if not toggle_clicks:
+            raise PreventUpdate
+        new_state = not is_open
+        return new_state, ('▴' if new_state else '▾')
+
+    raise PreventUpdate
 
 
 @app.callback(
@@ -1008,6 +1052,31 @@ def toggle_plot_collapse(n_clicks, is_open):
     new_state = not is_open
     icon = '▴' if new_state else '▾'
     return new_state, icon
+
+
+@app.callback(
+    Output('parameters-card-container', 'hidden', allow_duplicate=True),
+    Output('parameters-card-container', 'className', allow_duplicate=True),
+    Output('plot-options-card-container', 'hidden', allow_duplicate=True),
+    Output('run-button-container', 'hidden', allow_duplicate=True),
+    Output('continue-button-container', 'hidden', allow_duplicate=True),
+    Output('continue-button', 'disabled', allow_duplicate=True),
+    Output('run-button', 'disabled', allow_duplicate=True),
+    Input('continue-button', 'n_clicks'),
+    prevent_initial_call=True,
+)
+def reveal_parameters_card(n_clicks):
+    if not n_clicks:
+        raise PreventUpdate
+    return (
+        False,
+        'parameters-card-container visible',
+        False,
+        False,
+        True,
+        True,
+        False,
+    )
 
 
 @app.callback(
@@ -1480,7 +1549,8 @@ content_div = html.Div([title_row,
                         instructions_row,
                         file_upload,
                         table_preview_container,
-                        html.Div(parameter_card, hidden=True, id='parameters-card-container'),
+                        continue_button_container,
+                        html.Div(parameter_card, hidden=True, id='parameters-card-container', className='parameters-card-container'),
                         html.Div(run_button, className='run-button-container', hidden=True, id='run-button-container'),
                         html.Div(progress_div, hidden=True, id='progress-container'),
                         html.Div(plot_options_card, hidden=True, id='plot-options-card-container'),

@@ -58,7 +58,6 @@ body.dark-mode {
 
 .page-subtitle {
   font-size: 1.05rem;
-  max-width: 720px;
   color: var(--subtitle-color);
   margin-bottom: 1.5rem;
 }
@@ -341,6 +340,42 @@ is-open > .Select-control {
 .plot-hint {
   color: var(--hint-color, #6b7280);
   display: block;
+}
+
+.parameters-card-container {
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.parameters-card-container.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.parameters-card-container[hidden] {
+  display: none !important;
+}
+
+.continue-button-container {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 1.5rem;
+}
+
+.continue-button {
+  border-radius: 999px;
+  padding: 0.65rem 2rem;
+  font-weight: 600;
+  box-shadow: 0 10px 20px rgba(79, 70, 229, 0.18);
+}
+
+.modal.fade .modal-dialog {
+  transition: transform 0.45s ease-out, opacity 0.45s ease-out;
+}
+
+.modal.fade .modal-backdrop {
+  transition: opacity 0.45s ease-out;
 }
 
 .plot-actions {
