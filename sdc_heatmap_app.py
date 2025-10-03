@@ -20,11 +20,12 @@ from plotly.subplots import make_subplots
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 
-FILEPATH = 'data/oni_sdc_results_example.xlsx'
+FILEPATH = 'data/manaus_sdc_example.xlsx'
 METHOD_LABELS = {
     'pearson': "Pearson's r",
     'spearman': "Spearman's rho",
 }
+
 
 
 def build_figure(grid: pd.DataFrame,
@@ -74,17 +75,25 @@ def build_figure(grid: pd.DataFrame,
     z = z.where(mask)
     p = p.where(mask)
 
-
+    hover_text = np.where(
+        ~np.isnan(z.values),
+        'start_1=' + z.columns.astype(str).values + '<br>start_2=' + 
+        z.index.astype(str).values[:, np.newaxis] + '<br>r=' + 
+        np.char.mod('%.3f', z.values) + '<br>p=' + np.char.mod('%.3f', p.values),
+        ''  # Empty string for NaN
+    )
+    
     # Central heatmap
     fig.add_trace(
         go.Heatmap(
             z=z.values,
             x=z.columns,
             y=z.index,
-            text=p.values,
+            text=hover_text,
+            hoverinfo='text',
             colorscale='RdBu_r',
-            zmin=-1, 
-            zmax=1, 
+            zmin=-1,
+            zmax=1,
             zmid=0,
             colorbar=dict(
                 title=METHOD_LABELS[method],
@@ -93,12 +102,11 @@ def build_figure(grid: pd.DataFrame,
                 outlinewidth=2,
                 outlinecolor='black',
             ),
-            hovertemplate=
-            'start_1=%{x}<br>start_2=%{y}<br>r=%{z:.3f}<br>p=%{text:.4f}<extra></extra>',
         )
         ,
         row=2, col=2,
     )
+
 
     # Top: TS1 
     ts1 = ts_df.dropna(subset=['start_1', 'ts1'])

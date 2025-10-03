@@ -1432,16 +1432,63 @@ def manage_job(job_data, _):
         svg_button = dbc.Button('SVG', id='download-plot-svg-button', color='secondary', outline=True)
 
 
+        tab_header = dbc.Row(
+            [
+                dbc.Col(dcc.Markdown('### SDC Analysis Results')),
+                dbc.Col(
+                    html.Div(
+                        [
+                            dbc.ButtonGroup([download_button, xlsx_button, png_button, svg_button]),
+                            dcc.Download(id='download-results-xlsx'),
+                            dcc.Download(id='download-plot-png'),
+                            dcc.Download(id='download-plot-svg'),
+                        ],
+                        className='results-actions'
+                    ),
+                    className='d-flex justify-content-end'
+                ),
+            ],
+            justify='between'
+        )
+
+        interactive_placeholder = html.Div(
+            [
+                dbc.Spinner(color='primary', size='sm', spinnerClassName='interactive-placeholder-spinner'),
+                html.Div(
+                    [
+                        html.Strong('Interactive plot placeholder', className='interactive-placeholder-title'),
+                        html.Span(
+                            'The interactive Dash view will render here once implemented.',
+                            className='interactive-placeholder-subtitle'
+                        ),
+                    ],
+                    className='interactive-placeholder-copy'
+                ),
+            ],
+            className='interactive-plot-placeholder'
+        )
+
+        static_tab_content = html.Div(
+            [
+                html.Small('Click the plot to open a large preview.', className='plot-hint'),
+                image_div,
+            ],
+            className='static-plot-pane'
+        )
+
+        results_tabs = dbc.Tabs(
+            [
+                dbc.Tab(interactive_placeholder, label='Plot – Interactive', tab_id='interactive'),
+                dbc.Tab(static_tab_content, label='Plot – Static', tab_id='static'),
+            ],
+            id='results-plot-tabs',
+            active_tab='interactive',
+            className='results-tabs'
+        )
+
         results_children = [
-            dbc.Row([dbc.Col(dcc.Markdown('### SDC Analysis Results')),
-            dbc.Col(html.Div([
-                dbc.ButtonGroup([download_button, xlsx_button, png_button, svg_button]),
-                dcc.Download(id='download-results-xlsx'),
-                dcc.Download(id='download-plot-png'),
-                dcc.Download(id='download-plot-svg')
-            ], className='results-actions'))], justify='between'),
-            html.Small('Click the plot to open a large preview.', className='plot-hint'),
-            image_div,
+            tab_header,
+            results_tabs,
         ]
 
         duration_label = format_elapsed_time(analysis_duration)
