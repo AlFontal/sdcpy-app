@@ -3,6 +3,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
 [![Dash](https://img.shields.io/badge/Dash-2.x-119DFF.svg)](https://dash.plotly.com/)
 [![Docker](https://img.shields.io/badge/Docker-ready-0db7ed.svg)](https://www.docker.com/)
+[![CI](https://github.com/AlFontal/sdcpy-app/actions/workflows/ci.yml/badge.svg)](https://github.com/AlFontal/sdcpy-app/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-BSD-lightgrey.svg)](./LICENSE)
 
 <img src="https://raw.githubusercontent.com/AlFontal/sdcpy-app/master/static/sdcpy_logo_black.png" width="200" height="250" />
@@ -18,14 +19,31 @@ Scale Dependent Correlation (SDC) analyses through a friendly web interface.
   regenerate the visual instantly via the `Update Plot` button.
 - **Result handling** : view the generated SDC plot in-app, open it in a lightbox, and download the Excel output.
 
-## Getting Started (Docker Compose)
-The recommended way to run the app locally is with Docker Compose.
+## Quick Start (Recommended)
+
+The fastest way to run SDCpy App — no cloning required:
+
+```bash
+# Download the production compose file
+curl -O https://raw.githubusercontent.com/AlFontal/sdcpy-app/main/docker-compose.prod.yml
+
+# Start the app (pulls pre-built images from GitHub Container Registry)
+docker compose -f docker-compose.prod.yml up
+```
+
+Then open <http://localhost:8050> in your browser.
+
+## Development Setup (Docker Compose)
+
+For development or to build from source:
 
 ### Prerequisites
 - [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/install/) installed
 
 ### Launch the stack
 ```bash
+git clone https://github.com/AlFontal/sdcpy-app.git
+cd sdcpy-app
 docker compose up --build
 ```
 This starts three services declared in `docker-compose.yml`:
