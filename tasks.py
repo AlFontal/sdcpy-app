@@ -7,7 +7,17 @@ import math
 import base64
 import numpy as np
 import pandas as pd
+
+# Force non-interactive backend for faster rendering in worker processes
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+# Optimize matplotlib for performance
+plt.rcParams["path.simplify"] = True
+plt.rcParams["path.simplify_threshold"] = 1.0
+plt.rcParams["agg.path.chunksize"] = 10000
 
 import sdcpy.scale_dependent_correlation as sdc
 import sdcpy.core as sdc_core

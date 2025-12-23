@@ -133,8 +133,35 @@ def build_progress_content(progress=None):
 
     components = [dcc.Markdown(f"**{description}**")]
 
+    # Check if we're in the plot generation phase
+    is_plot_phase = description and "plot" in description.lower()
+
     if not progress or not progress.get("total"):
         components.append(dbc.Spinner(color="primary", size="sm"))
+    elif is_plot_phase:
+        # Special display for plot generation phase
+        components.append(
+            dbc.Progress(
+                value=100,
+                label="SDC Complete",
+                color="success",
+                striped=True,
+                animated=True,
+                className="my-2",
+            )
+        )
+        components.append(
+            html.Div(
+                [
+                    dbc.Spinner(color="info", size="sm", spinner_class_name="me-2"),
+                    html.Span(
+                        "Rendering visualization (this may take a moment for large datasets)...",
+                        className="text-muted",
+                    ),
+                ],
+                className="d-flex align-items-center mt-2",
+            )
+        )
     else:
         total = progress["total"] or 1
         current = progress.get("current", 0)
