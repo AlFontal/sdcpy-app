@@ -18,6 +18,13 @@ dash-ag-grid = "^2.1.0"
 
 [tool.poetry.dev-dependencies]
 gunicorn = "^20.1.0"
+pytest = "^8.0.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
