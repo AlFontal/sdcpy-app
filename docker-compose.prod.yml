@@ -1,0 +1,39 @@
+# SDCpy App - Quick Start
+#
+# Use this file to run the app from pre-built Docker images.
+# No need to clone the repository or build locally.
+#
+# Usage:
+#   curl -O https://raw.githubusercontent.com/AlFontal/sdcpy-app/main/docker-compose.prod.yml
+#   docker compose -f docker-compose.prod.yml up
+#
+# Then open http://localhost:8050
+
+services:
+  sdcpy-app:
+    image: ghcr.io/alfontal/sdcpy-app:beta
+    ports:
+      - "8050:8050"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - RQ_QUEUE=sdcpy
+      - SDC_JOB_TIMEOUT=3600
+      - SDC_JOB_TTL=3600
+    depends_on:
+      - redis
+
+  worker:
+    image: ghcr.io/alfontal/sdcpy-app:beta
+    command: rq worker --url redis://redis:6379/0 sdcpy
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:
