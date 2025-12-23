@@ -12,19 +12,19 @@ import pandas as pd
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: E402
 
 # Optimize matplotlib for performance
 plt.rcParams["path.simplify"] = True
 plt.rcParams["path.simplify_threshold"] = 1.0
 plt.rcParams["agg.path.chunksize"] = 10000
 
-import sdcpy.scale_dependent_correlation as sdc
-import sdcpy.core as sdc_core
+import sdcpy.scale_dependent_correlation as sdc  # noqa: E402
+import sdcpy.core as sdc_core  # noqa: E402
 
-from typing import Any, Dict, Optional
-from pandas import ExcelWriter
-from rq import get_current_job
+from typing import Any, Dict, Optional  # noqa: E402
+from pandas import ExcelWriter  # noqa: E402
+from rq import get_current_job  # noqa: E402
 
 metric_maps = {
     "pearson": "Pearson's r",
