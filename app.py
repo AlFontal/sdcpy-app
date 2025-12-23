@@ -1106,9 +1106,23 @@ def update_series(data):
         options = [{"value": col, "label": col} for col in df.columns]
 
         # Identify column types
-        date_cols = [
-            col for col in df.columns if pd.api.types.is_datetime64_any_dtype(df[col])
-        ]
+        # Check for datetime dtype OR string columns that look like dates
+        # (datetime dtype is lost when storing to JSON in dcc.Store)
+        date_cols = []
+        for col in df.columns:
+            if pd.api.types.is_datetime64_any_dtype(df[col]):
+                date_cols.append(col)
+            elif df[col].dtype == object or pd.api.types.is_string_dtype(df[col]):
+                # Try to parse as datetime - if it works, it's a date column
+                try:
+                    sample = df[col].dropna().head(5)
+                    if not sample.empty:
+                        parsed = pd.to_datetime(sample, errors="coerce")
+                        if parsed.notna().all():
+                            date_cols.append(col)
+                except Exception:
+                    pass
+
         numeric_cols = [
             col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])
         ]
@@ -1119,8 +1133,8 @@ def update_series(data):
         ts1_val = numeric_cols[0] if numeric_cols else None
         ts2_val = numeric_cols[1] if len(numeric_cols) > 1 else ts1_val
 
-        # Default window size (5% of length)
-        window_val = int(round(len(df) * 0.05)) if not df.empty else None
+        # Default window size (10% of length)
+        window_val = int(round(len(df) * 0.1)) if not df.empty else None
 
         return options, options, options, ts1_val, ts2_val, date_val, window_val
     else:
